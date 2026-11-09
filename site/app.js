@@ -229,7 +229,8 @@ VIEW.market = () => {
   let body = '';
   if (sub === 'fg') {
     const k = D.krfg, c = D.cnn;
-    const cnnComp = c?.comp ? Object.entries(c.comp).map(([key, v]) => ({ name: { market_momentum_sp500: 'S&P 500 모멘텀', market_momentum_sp125: 'S&P 125일 모멘텀', stock_price_strength: '52주 신고가·신저가', stock_price_breadth: '상승·하락 거래량', put_call_options: '풋/콜 비율', market_volatility_vix: '변동성(VIX)', market_volatility_vix_50: 'VIX 50일', junk_bond_demand: '정크본드 수요', safe_haven_demand: '안전자산 수요' }[key] || key, score: v.score })).filter((x) => x.score != null) : [];
+    const CNNL = { market_momentum_sp500: 'S&P 500 모멘텀', market_momentum_sp125: 'S&P 125일 모멘텀', stock_price_strength: '52주 신고가·신저가', stock_price_breadth: '상승·하락 거래량', put_call_options: '풋/콜 비율', market_volatility_vix: '변동성(VIX)', market_volatility_vix_50: 'VIX 50일', junk_bond_demand: '정크본드 수요', safe_haven_demand: '안전자산 수요' };
+    const cnnComp = c?.comp ? Object.entries(c.comp).filter(([key, v]) => CNNL[key] && v.score != null).map(([key, v]) => ({ name: CNNL[key], score: v.score })) : [];
     const bars = (arr) => `<div class="bars">${arr.map((x) => `<div class="bar"><span>${esc(x.name)}</span><span class="tr"><i style="width:${x.score}%;background:${x.score < 45 ? '#1c7ed6' : x.score > 55 ? '#d6336c' : '#adb5bd'}"></i></span><span class="n">${Math.round(x.score)}</span></div>`).join('')}</div>`;
     body = `
     <section class="card c6">${gauge(c?.score, '미국 · CNN 공포탐욕', c ? `발표 ${kstTime(c.at)}` : '', c ? `전일 ${Math.round(c.prev)} · 1주 ${Math.round(c.w1)} · 1달 ${Math.round(c.m1)} · 1년 ${Math.round(c.y1)}` : '')}<h3>구성 지표</h3>${bars(cnnComp)}<h3>최근 1년</h3>${c ? lineChart([{ name: 'CNN', color: '#d6336c', pts: c.hist }], { h: 170, band: [0, 100], yfmt: (v) => fmt(v) }) : ''}</section>
@@ -314,7 +315,7 @@ VIEW.cal = () => {
   const t0 = todayISO();
   const rows = D.calendar.filter((r) => r.d >= addDays(t0, -1) && (!state.calKind || r.kind === state.calKind));
   return `<section class="card"><h2>일정 <span class="seg" id="ck">${kinds.map(([k, n]) => `<button data-c="${k}" class="${state.calKind === k ? 'on' : ''}">${n}</button>`).join('')}</span></h2>
-    <p class="sub">한국 시간 · <span class="imp i3"></span>매우 중요 <span class="imp i2"></span>중요 <span class="imp"></span>참고 · 실적은 시가총액 300억 달러 이상</p>${calRows(rows)}</section>`;
+    <p class="sub">한국 시간 · <span class="imp i3"></span>매우 중요 <span class="imp i2"></span>중요 <span class="imp"></span>참고 · 실적은 시가총액 300억 달러 이상(홈에는 1,000억 달러 이상만)</p>${calRows(rows)}</section>`;
 };
 
 /* ── 그리기·이벤트 ── */

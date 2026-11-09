@@ -117,24 +117,40 @@ export function anomalies(sum, flows) {
 }
 
 /* ── 뉴스 묶기: 비슷한 제목을 한 사건으로, 여러 매체가 다룬 순 ── */
-const STOP = new Set('속보 단독 종합 오늘 내일 어제 이번 지난 올해 대한 관련 위해 이후 이상 미만 전망 가능성 우려 기대 확대 축소 발표 개장 마감 출발 기록 연합뉴스 뉴스 기자 사진 영상 그래픽 the a an to of in on for and is are with as at by from after over up down says said its it new news update live stocks stock market markets'.split(' '));
+const STOP = new Set('억원 조원 대비 작년 내년 최대 기업 목표 투자 지원 장중 분기 속보 단독 종합 오늘 내일 어제 이번 지난 올해 대한 관련 위해 이후 이상 미만 전망 가능성 우려 기대 확대 축소 발표 개장 마감 출발 기록 연합뉴스 뉴스 기자 사진 영상 그래픽 the a an to of in on for and is are with as at by from after over up down says said its it new news update live stocks stock market markets'.split(' '));
 export const tokens = (t) => new Set((t.toLowerCase().replace(/\[[^\]]*\]|\([^)]*\)|<[^>]*>/g, ' ').match(/[가-힣]{2,}|[a-z][a-z0-9&.]{1,}|\d+(?:\.\d+)?%?/g) || [])
-  .map((w) => w.replace(/(은|는|이|가|을|를|의|에|에서|으로|로|와|과|도|만|까지|부터|보다)$/, '')).filter((w) => w.length >= 2 && !STOP.has(w)));
+  .map((w) => { const P = /(은|는|이|가|을|를|의|에|에서|으로|로|와|과|도|만|까지|부터|보다)$/; return w.length > 2 ? w.replace(P, '').replace(P, '') : w; }).filter((w) => w.length >= 2 && !STOP.has(w)));
 function sim(a, b) { let n = 0; for (const x of a) if (b.has(x)) n++; return { n, j: n / (a.size + b.size - n || 1) }; }
 export function clusterNews(news, hours = 24) {
   const since = Date.now() - hours * 3600e3;
   const items = news.filter((n) => n.ts >= since).map((n) => ({ ...n, tk: tokens(n.title) }));
   const cl = [];
+  // 시황 기사(지수 마감·장중 흐름)는 시장별로 한 사건으로 모은다
+  const WRAP = /(마감|하락|상승|반등|출발|보합|급락|급등|사수|약세|강세|혼조|랠리|장중|開場|개장)/;
+  const wraps = { kr: { items: [], tk: new Set(['코스피']) }, us: { items: [], tk: new Set(['뉴욕증시']) } };
+  for (const it of [...items]) {
+    const t = it.title;
+    const key = /코스피|코스닥|국내 증시|국내증시|韓증시|한국 증시/.test(t) && WRAP.test(t) ? 'kr' : /뉴욕증시|뉴욕 증시|美증시|미국 증시|나스닥|다우|S&P/.test(t) && WRAP.test(t) ? 'us' : null;
+    if (key) { wraps[key].items.push(it); items.splice(items.indexOf(it), 1); }
+  }
+  for (const w of Object.values(wraps)) if (w.items.length) { w.wrap = true; cl.push(w); }
   for (const it of items) {
     let best = null, bs = 0;
-    for (const c of cl) { const s = sim(it.tk, c.tk); const score = s.j >= 0.34 || s.n >= 3 ? s.j + s.n * 0.05 : 0; if (score > bs) { bs = score; best = c; } }
+    for (const c of cl) { if (c.wrap) continue; const s = sim(it.tk, c.tk); const score = s.j >= 0.3 || s.n >= 3 || (s.n >= 2 && s.j >= 0.2) ? s.j + s.n * 0.05 : 0; if (score > bs) { bs = score; best = c; } }
     if (best) { best.items.push(it); for (const w of it.tk) best.tk.add(w); } else cl.push({ items: [it], tk: new Set(it.tk) });
   }
+  // 2단계: 같은 사건이 여러 묶음으로 갈라진 것을 다시 합친다
+  for (let i = 0; i < cl.length; i++) for (let j = cl.length - 1; j > i; j--) {
+    if (cl[i].wrap || cl[j].wrap) continue;
+    const s = sim(cl[i].tk, cl[j].tk), a = tokens(cl[i].items[0].title), b = tokens(cl[j].items[0].title), t = sim(a, b);
+    if ((t.n >= 2 && t.j >= 0.18) || (s.n >= 4 && s.j >= 0.2)) { cl[i].items.push(...cl[j].items); for (const w of cl[j].tk) cl[i].tk.add(w); cl.splice(j, 1); }
+  }
   return cl.map((c) => {
+    c.items.sort((a, b) => b.ts - a.ts);
     const srcs = [...new Set(c.items.map((x) => x.src))];
-    const lead = c.items.find((x) => x.main) || c.items.reduce((a, b) => (a.title.length <= b.title.length ? a : b));
+    const lead = c.wrap ? (c.items.find((x) => /마감/.test(x.title)) || c.items[0]) : c.items.find((x) => x.main) || c.items.reduce((a, b) => (a.title.length <= b.title.length ? a : b));
     const score = srcs.length * 2 + c.items.length + (c.items.some((x) => x.main) ? 2 : 0);
-    return { title: lead.title, sum: lead.sum || '', ts: Math.max(...c.items.map((x) => x.ts)), n: c.items.length, srcs, score, items: c.items.slice(0, 8).map(({ title, url, src, ts }) => ({ title, url, src, ts })) };
+    return { title: (c.wrap ? '[시황] ' : '') + lead.title, wrap: !!c.wrap, sum: lead.sum || '', ts: Math.max(...c.items.map((x) => x.ts)), n: c.items.length, srcs, score, items: c.items.slice(0, 8).map(({ title, url, src, ts }) => ({ title, url, src, ts })) };
   }).sort((a, b) => b.score - a.score || b.ts - a.ts);
 }
 export function hotKeywords(news, hours = 24) {
@@ -145,26 +161,39 @@ export function hotKeywords(news, hours = 24) {
 }
 
 /* ── 일정 정리 (한국 시간) ── */
+// Nasdaq 경제 일정의 시각은 미국 동부 시간이다 (서머타임 반영)
+const NY = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+function etToUtc(d, hh, mm) {
+  const guess = Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), hh, mm);
+  const p = Object.fromEntries(NY.formatToParts(new Date(guess)).map((x) => [x.type, x.value]));
+  const asNY = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute);
+  return guess + (guess - asNY);
+}
 const KEY_EVENTS = /CPI|PPI|PCE|Nonfarm|Payroll|Unemployment Rate|Jobless|FOMC|Fed |Fed's|Interest Rate|Rate Decision|GDP|Retail Sales|ISM|PMI|Consumer Confidence|Michigan|Durable|Housing Starts|Existing Home|New Home|Trade Balance|Industrial Production|JOLTS|Powell|BoJ|BOJ|ECB|Lagarde|Export|Import|Inflation|Employment|Beige Book|Treasury|Bond Auction|Crude Oil Inventories/i;
-const COUNTRY = { 'United States': '🇺🇸 미국', 'South Korea': '🇰🇷 한국', China: '🇨🇳 중국', Japan: '🇯🇵 일본', 'Euro Zone': '🇪🇺 유로존', Germany: '🇩🇪 독일', 'United Kingdom': '🇬🇧 영국' };
+const COUNTRY = { 'United States': '미국', 'South Korea': '한국', China: '중국', Japan: '일본', 'Euro Zone': '유로존', Germany: '독일', 'United Kingdom': '영국' };
 export function calendar(S) {
-  const cal = S.calendar || { econ: [], earn: [] }, rows = [];
+  const cal = S.calendar || { econ: [], earn: [] }, rows = [], seenEv = new Set();
   for (const e of cal.econ) {
     if (!COUNTRY[e.c]) continue;
-    const imp = KEY_EVENTS.test(e.name) ? (/(CPI|Nonfarm|Payroll|FOMC|Rate Decision|Interest Rate|GDP|PCE|Powell)/i.test(e.name) ? 3 : 2) : 1;
+    let imp = KEY_EVENTS.test(e.name) ? (/(CPI|Nonfarm|Payroll|FOMC Statement|Rate Decision|Interest Rate Decision|GDP|PCE|Powell)/i.test(e.name) ? 3 : 2) : 1;
+    if (/Speaks|Speech|Testimony|GDPNow|Expectations|Auction|Minutes/i.test(e.name) && !/Powell|FOMC Minutes/i.test(e.name)) imp = 1;
+    if (e.c !== 'United States' && e.c !== 'South Korea' && imp === 3) imp = 2;
+    if (!['United States', 'South Korea', 'China'].includes(e.c) && !/CPI|Rate Decision|Interest Rate|GDP|BoJ|ECB|Lagarde|Ueda/i.test(e.name)) imp = 1;
     if (imp < 2 && e.c !== 'South Korea') continue;
     let kst = e.d, time = '';
     const m = /^(\d{1,2}):(\d{2})$/.exec(e.t || '');
-    if (m) { const dt = new Date(Date.UTC(+e.d.slice(0, 4), +e.d.slice(5, 7) - 1, +e.d.slice(8, 10), +m[1] + 9, +m[2])); kst = dt.toISOString().slice(0, 10); time = dt.toISOString().slice(11, 16); }
+    if (m) { const dt = new Date(etToUtc(e.d, +m[1], +m[2]) + 9 * 3600e3); kst = dt.toISOString().slice(0, 10); time = dt.toISOString().slice(11, 16); }
+    const key = `${kst} ${time} ${e.c} ${e.name}`; if (seenEv.has(key)) continue; seenEv.add(key);
     rows.push({ kind: 'econ', d: kst, time, c: COUNTRY[e.c], name: e.name, act: e.act, cons: e.cons, prev: e.prev, imp });
   }
-  for (const x of cal.earn) rows.push({ kind: 'earn', d: x.d, time: x.when === 'time-pre-market' ? '장 전' : x.when === 'time-after-hours' ? '장 마감 후' : '', c: '🇺🇸 미국', name: `${x.name} (${x.sym}) 실적`, sym: x.sym, cap: x.cap, eps: x.eps, imp: x.cap >= 2e11 ? 3 : 2 });
+  const seenCo = new Set();
+  for (const x of cal.earn) if (!seenCo.has(x.name) && seenCo.add(x.name)) rows.push({ kind: 'earn', d: x.d, time: x.when === 'time-pre-market' ? '장 전' : x.when === 'time-after-hours' ? '장 마감 후' : '', c: '미국', name: `${x.name} (${x.sym}) 실적`, sym: x.sym, cap: x.cap, eps: x.eps, imp: x.cap >= 3e11 ? 3 : x.cap >= 1e11 ? 2 : 1 });
   // 옵션·선물 만기
   const today = kstISO().slice(0, 10);
   for (let i = 0; i <= 31; i++) {
     const d = new Date(Date.parse(today + 'T00:00:00Z') + i * 864e5), iso = d.toISOString().slice(0, 10), day = d.getUTCDate(), wd = d.getUTCDay(), mo = d.getUTCMonth() + 1;
-    if (wd === 4 && day >= 8 && day <= 14) rows.push({ kind: 'expiry', d: iso, time: '15:20', c: '🇰🇷 한국', name: [3, 6, 9, 12].includes(mo) ? '선물·옵션 동시 만기' : '옵션 만기', imp: [3, 6, 9, 12].includes(mo) ? 3 : 2 });
-    if (wd === 5 && day >= 15 && day <= 21) rows.push({ kind: 'expiry', d: iso, time: '', c: '🇺🇸 미국', name: [3, 6, 9, 12].includes(mo) ? '쿼드러플 위칭(선물·옵션 동시 만기)' : '월간 옵션 만기', imp: [3, 6, 9, 12].includes(mo) ? 3 : 2 });
+    if (wd === 4 && day >= 8 && day <= 14) rows.push({ kind: 'expiry', d: iso, time: '15:20', c: '한국', name: [3, 6, 9, 12].includes(mo) ? '선물·옵션 동시 만기' : '옵션 만기', imp: [3, 6, 9, 12].includes(mo) ? 3 : 2 });
+    if (wd === 5 && day >= 15 && day <= 21) rows.push({ kind: 'expiry', d: iso, time: '', c: '미국', name: [3, 6, 9, 12].includes(mo) ? '쿼드러플 위칭(선물·옵션 동시 만기)' : '월간 옵션 만기', imp: [3, 6, 9, 12].includes(mo) ? 3 : 2 });
   }
   return rows.sort((a, b) => (a.d + (a.time || '99')).localeCompare(b.d + (b.time || '99')));
 }
