@@ -184,7 +184,8 @@ export function calendar(S) {
     const m = /^(\d{1,2}):(\d{2})$/.exec(e.t || '');
     if (m) { const dt = new Date(etToUtc(e.d, +m[1], +m[2]) + 9 * 3600e3); kst = dt.toISOString().slice(0, 10); time = dt.toISOString().slice(11, 16); }
     const key = `${kst} ${time} ${e.c} ${e.name}`; if (seenEv.has(key)) continue; seenEv.add(key);
-    rows.push({ kind: 'econ', d: kst, time, c: COUNTRY[e.c], name: e.name, act: e.act, cons: e.cons, prev: e.prev, imp });
+    const cl = (v) => String(v || '').replace(/&nbsp;|&#160;/g, ' ').trim();
+    rows.push({ kind: 'econ', d: kst, time, c: COUNTRY[e.c], name: e.name, act: cl(e.act), cons: cl(e.cons), prev: cl(e.prev), imp });
   }
   const seenCo = new Set();
   for (const x of cal.earn) if (!seenCo.has(x.name) && seenCo.add(x.name)) rows.push({ kind: 'earn', d: x.d, time: x.when === 'time-pre-market' ? '장 전' : x.when === 'time-after-hours' ? '장 마감 후' : '', c: '미국', name: `${x.name} (${x.sym}) 실적`, sym: x.sym, cap: x.cap, eps: x.eps, imp: x.cap >= 3e11 ? 3 : x.cap >= 1e11 ? 2 : 1 });
