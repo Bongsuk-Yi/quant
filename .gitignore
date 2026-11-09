@@ -1,0 +1,5 @@
+node_modules/
+dist/
+reports/
+work/
+store.enc.json

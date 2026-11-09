@@ -1,0 +1,72 @@
+name: AI 브리핑
+
+on:
+  schedule:
+    - cron: '47 21 * * 0-4'   # 평일 06:47 KST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: ai-brief
+  cancel-in-progress: false
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: 최신 자료 수집
+        run: |
+          git fetch origin data --depth=1 && git show origin/data:store.enc.json > store.enc.json || true
+          node scripts/collect.mjs store.enc.json
+
+      - name: 브리핑 자료 정리
+        run: node scripts/brief-data.mjs store.enc.json work/brief.md
+
+      - name: Claude 로 브리핑 작성
+        working-directory: work
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "::error::GitHub Secret CLAUDE_CODE_OAUTH_TOKEN 이 없습니다"; exit 1; fi
+          npm i -g @anthropic-ai/claude-code >/dev/null 2>&1
+          mkdir -p out
+          node -e '
+            const fs=require("fs"); const d=new Date(Date.now()+9*3600e3);
+            const t=fs.readFileSync("../prompts/brief.md","utf8").replaceAll("{{TODAY}}",d.toISOString().slice(0,10))
+              .replaceAll("{{WEEKDAY}}","일월화수목금토"[d.getUTCDay()]+"요일").replaceAll("{{MONTHDAY}}",`${d.getUTCMonth()+1}월 ${d.getUTCDate()}일`);
+            fs.writeFileSync("prompt.txt",t);'
+          claude -p "$(cat prompt.txt)" --allowedTools "Read,Write,Glob,Grep,WebSearch,WebFetch" --output-format json ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"} > claude.json || { tail -c 2000 claude.json; exit 1; }
+          node -e '
+            const fs=require("fs"); const r=JSON.parse(fs.readFileSync("claude.json","utf8"));
+            if (r.is_error) { console.log("::error::", String(r.result).slice(0,1500)); process.exit(1); }
+            const md=fs.existsSync("out/report.md")?fs.readFileSync("out/report.md","utf8"):"";
+            if (md.length<800) { console.log("::error::브리핑이 없거나 너무 짧습니다", md.length, String(r.result).slice(0,800)); process.exit(1); }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${md.length.toLocaleString()}자 · 턴 ${r.num_turns} · 모델 ${Object.keys(r.modelUsage||{}).join(",")}\n`);'
+
+      - name: 암호화해서 reports 브랜치에 저장
+        run: |
+          id=$(TZ=Asia/Seoul date +%F)
+          git fetch origin reports --depth=1 && git worktree add rep origin/reports || { git worktree add --detach rep && (cd rep && git checkout -q --orphan reports-new && git rm -rfq . 2>/dev/null || true); }
+          mkdir -p rep/r
+          node -e '
+            import("./scripts/gate.mjs").then(g=>{const fs=require("fs"); fs.writeFileSync(process.argv[1], JSON.stringify(g.encrypt(fs.readFileSync("work/out/report.md"), g.sitePassword())));});' "rep/r/$id.md.enc.json"
+          cd rep
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add -A && git commit -qm "brief $id" && git push origin HEAD:reports
+
+      - name: 사이트 다시 배포
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run update.yml -R ${{ github.repository }} -f collect=false
