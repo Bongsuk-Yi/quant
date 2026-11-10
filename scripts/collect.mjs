@@ -298,7 +298,7 @@ if (!S.options?.at || Date.now() - Date.parse(S.options.at) > 3 * 3600e3) {
 log('▶ 커뮤니티');
 {
   const ape = await tryGet('apewisdom', 'https://apewisdom.io/api/v1.0/filter/all-stocks/page/1', { tries: 2 });
-  const us = (ape?.results || []).slice(0, 40).map((r) => ({ sym: r.ticker, name: r.name, m: +r.mentions, m0: +r.mentions_24h_ago || 0, rank: +r.rank, rank0: +r.rank_24h_ago || null, up: +r.upvotes }));
+  const us = (ape?.results || []).slice(0, 40).map((r) => ({ sym: r.ticker, name: String(r.name || '').replace(/&amp;/g, '&').replace(/&#39;|&apos;/g, "'"), m: +r.mentions, m0: +r.mentions_24h_ago || 0, rank: +r.rank, rank0: +r.rank_24h_ago || null, up: +r.upvotes }));
   const kr = [];
   for (const mk of ['KOSPI', 'KOSDAQ']) {
     const j = await tryGet(`naver searchTop ${mk}`, `${M}/stocks/searchTop/${mk}?page=1&pageSize=20`, { tries: 1 });
