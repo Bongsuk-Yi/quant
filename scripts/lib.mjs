@@ -1,8 +1,9 @@
-// 공용 도구: HTTP 요청, 숫자 변환, 날짜
+// 공용 도구: HTTP 요청, 숫자 변환, 날짜, xlsx 읽기
+import { inflateRawSync } from 'node:zlib';
 export const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function get(url, { json = true, headers = {}, timeout = 25000, tries = 3, encoding } = {}) {
+export async function get(url, { json = true, headers = {}, timeout = 25000, tries = 3, encoding, buffer } = {}) {
   let last;
   for (let i = 0; i < tries; i++) {
     try {
@@ -10,6 +11,7 @@ export async function get(url, { json = true, headers = {}, timeout = 25000, tri
       if (url.includes('naver.com')) h.Referer ??= 'https://m.stock.naver.com/';
       const r = await fetch(url, { headers: h, signal: AbortSignal.timeout(timeout) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (buffer) return Buffer.from(await r.arrayBuffer());
       if (encoding) return new TextDecoder(encoding).decode(await r.arrayBuffer());
       const t = await r.text();
       return json ? JSON.parse(t) : t;
@@ -54,4 +56,33 @@ export function parseRss(xml, source) {
     if (title && link) out.push({ title, url: link.trim(), src, ts: Number.isFinite(t) ? t : Date.now() });
   }
   return out;
+}
+
+// xlsx(zip) 첫 시트를 행 배열로 읽는다 (외부 라이브러리 없이)
+export function unzip(buf) {
+  const out = new Map(), eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  if (eocd < 0) throw new Error('zip 형식이 아님');
+  const n = buf.readUInt16LE(eocd + 10); let p = buf.readUInt32LE(eocd + 16);
+  for (let i = 0; i < n; i++) {
+    const method = buf.readUInt16LE(p + 10), csize = buf.readUInt32LE(p + 20), nlen = buf.readUInt16LE(p + 28), elen = buf.readUInt16LE(p + 30), clen = buf.readUInt16LE(p + 32), lho = buf.readUInt32LE(p + 42);
+    const name = buf.toString('utf8', p + 46, p + 46 + nlen), start = lho + 30 + buf.readUInt16LE(lho + 26) + buf.readUInt16LE(lho + 28), data = buf.subarray(start, start + csize);
+    out.set(name, method === 0 ? data : inflateRawSync(data)); p += 46 + nlen + elen + clen;
+  }
+  return out;
+}
+export function xlsxRows(buf) {
+  const z = unzip(buf), un = (t) => String(t ?? '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  const ss = [...(z.get('xl/sharedStrings.xml')?.toString('utf8') || '').matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => un([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join('')));
+  const sheet = [...z.keys()].filter((k) => /^xl\/worksheets\/sheet\d+\.xml$/.test(k)).sort()[0];
+  const rows = [];
+  for (const r of z.get(sheet).toString('utf8').matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)) {
+    const row = [];
+    for (const c of r[1].matchAll(/<c ([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      const ref = /r="([A-Z]+)\d+"/.exec(c[1])?.[1] || '', col = [...ref].reduce((s, ch) => s * 26 + ch.charCodeAt(0) - 64, 0) - 1, t = /t="(\w+)"/.exec(c[1])?.[1];
+      const v = /<v>([\s\S]*?)<\/v>/.exec(c[2] || '')?.[1], is = /<is>[\s\S]*?<t[^>]*>([\s\S]*?)<\/t>/.exec(c[2] || '')?.[1];
+      row[col < 0 ? row.length : col] = t === 's' ? ss[+v] : t === 'inlineStr' ? un(is) : un(v);
+    }
+    rows.push(row);
+  }
+  return rows;
 }

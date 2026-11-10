@@ -318,10 +318,42 @@ function stockReportList() {
     <div class="tw"><table class="tbl"><thead><tr><th>작성</th><th>종목</th><th class="r">분량</th><th>모델</th></tr></thead><tbody>${rows.map((r) => `<tr data-srep="${esc(r.id)}" style="cursor:pointer"><td class="n sm">${kstTime(r.created)}</td><td><b>${esc(r.name)}</b> <span class="sm">${esc(r.code)} · ${esc(r.market)}</span></td><td class="r">${fmt(r.chars)}자</td><td class="sm">${esc(r.model)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">아직 만든 리포트가 없습니다.</td></tr>'}</tbody></table></div></section>`;
 }
 
+/* ── ETF 자금 흐름 ── */
+const usd = (m) => (m == null ? '-' : Math.abs(m) >= 1000 ? `${m > 0 ? '+' : m < 0 ? '−' : ''}$${fmt(Math.abs(m) / 1000, 2)}B` : `${m > 0 ? '+' : m < 0 ? '−' : ''}$${fmt(Math.abs(m))}M`);
+function etfView() {
+  const E = D.etf; if (!E) return `<section class="card"><h2>ETF 자금 흐름</h2><p class="note">자료를 아직 받지 못했습니다.</p></section>`;
+  const K = E.kr, k = state.etfKey, fk = 'f' + k, has = K.days > 0;
+  const wait = `<p class="warn">자금 흐름은 전날과 오늘의 상장좌수를 비교해 계산합니다. 기준 스냅숏을 ${md(K.lastD)}에 처음 저장했고, 다음 거래일 장이 열린 뒤부터 유입·유출이 표시됩니다.</p>`;
+  const tabs = `<div class="tw"><table class="tbl"><thead><tr><th>유형</th><th class="r">ETF 수</th><th class="r">순자산</th><th class="r">1일</th><th class="r">5일</th><th class="r">20일</th></tr></thead><tbody>${K.tabs.map((t) => `<tr><td><b>${esc(t.name)}</b></td><td class="r">${t.n}</td><td class="r">${fmt(t.mcap / 10000, 1)}조</td>${['f1', 'f5', 'f20'].map((f) => `<td class="r ${has ? cls(t[f]) : 'flat'}">${has ? eok(t[f]) : '-'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const row = (x) => `<tr><td><a href="${krLink(x.code)}" target="_blank" rel="noopener noreferrer" data-ext="1"><b>${esc(x.name)}</b></a> <span class="sm">${x.code}</span></td><td class="r ${cls(x[fk])}"><b>${eok(x[fk])}</b></td><td class="r sm">${x.mcap ? sgn(x[fk] / x.mcap * 100, 1) : '-'}</td><td class="r">${fmt(x.mcap / 10000, 2)}조</td><td class="r ${cls(x.pct)}">${sgn(x.pct)}</td></tr>`;
+  const tbl = (rows) => `<div class="tw"><table class="tbl"><thead><tr><th>ETF</th><th class="r">순유입</th><th class="r">순자산 대비</th><th class="r">순자산</th><th class="r">등락</th></tr></thead><tbody>${rows.map(row).join('') || '<tr><td colspan="5" class="empty">해당 기간에 좌수 변화가 없습니다</td></tr>'}</tbody></table></div>`;
+  const ins = [...K.list].filter((x) => x[fk] > 0).sort((a, b) => b[fk] - a[fk]).slice(0, 20), outs = [...K.list].filter((x) => x[fk] < 0).sort((a, b) => a[fk] - b[fk]).slice(0, 20);
+  const ik = state.etfInv, inv = K.inv.map((x) => `<tr><td><b>${esc(x.name)}</b> <span class="sm">${x.code}</span></td>${['p', 'f', 'o'].map((w) => `<td class="r ${cls(x[w + ik])}">${fmt(x[w + ik])}</td>`).join('')}<td class="r">${fmt(x.mcap / 10000, 2)}조</td></tr>`).join('');
+  const us = E.us || [], uk = state.etfUs, ufk = 'f' + uk;
+  const usRow = (x) => `<tr data-usetf="${x.t}" style="cursor:pointer"><td><b>${x.t}</b> <span class="sm">${esc(x.name)}${x.est ? ' · 추정' : ''}</span></td><td class="r ${cls(x[ufk])}"><b>${x[ufk] == null ? '-' : usd(x[ufk])}</b></td><td class="r sm ${cls(x.p20)}">${x.p20 == null ? '-' : sgn(x.p20, 1)}</td><td class="r">$${fmt(x.aum / 1000, 1)}B</td><td class="sm n">${md(x.d)}</td></tr>`;
+  const usT = (rows) => `<div class="tw"><table class="tbl"><thead><tr><th>ETF</th><th class="r">순유입</th><th class="r">20일/순자산</th><th class="r">순자산</th><th>기준</th></tr></thead><tbody>${rows.map(usRow).join('') || '<tr><td colspan="5" class="empty">자료 없음</td></tr>'}</tbody></table></div>`;
+  const sp = us.filter((x) => !x.est).sort((a, b) => (b[ufk] ?? -1e15) - (a[ufk] ?? -1e15)), nq = us.filter((x) => x.est).sort((a, b) => (b[ufk] ?? -1e15) - (a[ufk] ?? -1e15));
+  return `
+  <section class="card"><h2>한국 ETF 자금 흐름</h2><p class="sub">자금 흐름 = 상장좌수 증감 × 순자산가치(NAV) · ETF ${fmt(K.count)}개 · 순자산 합계 ${fmt(K.mcap / 10000, 0)}조원 · 기준 ${md(K.lastD)}${has ? ` · ${K.days}거래일 누적` : ''}</p>
+    ${has ? '' : wait}<h3>유형별 순유입</h3>${tabs}
+    ${has && K.total.length > 1 ? `<h3>전체 ETF 하루 순유입 (억원)</h3>${lineChart([{ name: '순유입', bar: true, pts: K.total }], { h: 170, zero: true, yfmt: (v) => fmt(v / 10000, 1) + '조' })}` : ''}</section>
+  ${has ? `<section class="card" style="padding:10px 14px"><span class="seg" id="etfk">${[['1', '1일'], ['5', '5일'], ['20', '20일']].map(([v, n]) => `<button data-k="${v}" class="${k === v ? 'on' : ''}">${n}</button>`).join('')}</span> <span class="muted">아래 두 표의 기간</span></section>
+  <section class="card c6"><h2>돈이 들어온 ETF</h2><p class="sub">순유입 상위</p>${tbl(ins)}</section>
+  <section class="card c6"><h2>돈이 빠진 ETF</h2><p class="sub">순유출 상위</p>${tbl(outs)}</section>` : ''}
+  <section class="card"><h2>주요 ETF 투자자별 순매수 <span class="seg" id="etfi">${[['1', '1일'], ['5', '5일'], ['20', '20일']].map(([v, n]) => `<button data-k="${v}" class="${ik === v ? 'on' : ''}">${n}</button>`).join('')}</span></h2><p class="sub">시가총액 상위 40개 ETF · 억원(순매수 수량 × 종가) · 기준 ${K.inv[0] ? md(ymdDash(K.inv[0].d)) : '-'} · 네이버 증권</p>
+    <div class="tw"><table class="tbl"><thead><tr><th>ETF</th><th class="r">개인</th><th class="r">외국인</th><th class="r">기관</th><th class="r">순자산</th></tr></thead><tbody>${inv || '<tr><td colspan="5" class="empty">자료 없음</td></tr>'}</tbody></table></div>
+    <p class="note">ETF는 기관(유동성 공급자)이 개인의 반대편에서 거래하는 일이 많아, 개인 순매수가 실제 수요를 더 잘 보여 줍니다.</p></section>
+  <section class="card" style="padding:10px 14px"><span class="seg" id="etfu">${[['1', '1일'], ['5', '5일'], ['20', '20일'], ['60', '60일']].map(([v, n]) => `<button data-k="${v}" class="${uk === v ? 'on' : ''}">${n}</button>`).join('')}</span> <span class="muted">미국 ETF 기간 · 줄을 누르면 누적 차트</span></section>
+  <section class="card c6"><h2>미국 ETF — SPDR 계열</h2><p class="sub">운용사(SSGA) 공시 좌수·NAV로 계산 · S&P 500과 업종별 ETF</p>${usT(sp)}</section>
+  <section class="card c6"><h2>미국 ETF — 그 외 (추정)</h2><p class="sub">순자산 변화에서 가격 변동분을 뺀 추정치 · Nasdaq 자료 · 설치 뒤부터 쌓임 · 60일은 아직 없음</p>${usT(nq)}</section>
+  <section class="card"><p class="note" style="margin:0">한국 ETF의 좌수는 억원 단위 시가총액에서 역산해 1.5억원 미만 변화는 0으로 처리합니다. 거래량이 많아도 좌수가 그대로면 순유입은 0입니다.</p></section>`;
+}
+function openUsEtf(t) { const x = (D.etf?.us || []).find((y) => y.t === t); if (!x) return; modal(`${x.t} ${esc(x.name)} <small>누적 순유입 (백만 달러)${x.est ? ' · 추정' : ''}</small>`, x.hist.length > 1 ? lineChart([{ name: '누적 순유입', color: '#3b5bdb', pts: x.hist }], { h: 240, zero: true, yfmt: (v) => fmt(v) }) : '<p class="note">자료가 이틀 이상 쌓이면 차트가 나옵니다.</p>'); }
+
 /* ── 화면 ── */
 const VIEW = {};
 VIEW.stock = viewStock;
-const state = { tab: 'home', tileGrp: lsGet('q.tile', 'kr'), mvRegion: 'kr', thRegion: 'kr', mkt: 'fg', rscope: 'all', mcat: '', smKey: '1', stock: null, stockErr: '', sq: '', smk: '', ssort: 'cap', sdir: 1, sper: 120, aiSub: 'mkt', newsSrc: '', kw: '', report: 0, calKind: '' };
+const state = { tab: 'home', tileGrp: lsGet('q.tile', 'kr'), mvRegion: 'kr', thRegion: 'kr', mkt: 'fg', rscope: 'all', mcat: '', smKey: '1', flowSub: 'inv', etfKey: '1', etfInv: '5', etfUs: '20', stock: null, stockErr: '', sq: '', smk: '', ssort: 'cap', sdir: 1, sper: 120, aiSub: 'mkt', newsSrc: '', kw: '', report: 0, calKind: '' };
 
 VIEW.home = () => {
   const now = kstNow(), mm = now.getUTCMonth() + 1, dd = now.getUTCDate();
@@ -446,12 +478,16 @@ VIEW.flow = () => {
   const cot = D.cot.map((c) => `<tr data-cot="${c.code}" style="cursor:pointer"><td><b>${esc(c.name)}</b> <span class="sm">${md(c.d)}</span></td><td class="r ${cls(c.net)}">${fmt(c.net)}</td><td class="r ${cls(c.chg)}">${c.chg == null ? '-' : (c.chg > 0 ? '+' : '') + fmt(c.chg)}</td><td class="r">${c.idx ?? '-'}</td></tr>`).join('');
   const ins = (D.insider?.rows || []).slice(0, 40).map((r) => `<tr><td class="n sm">${esc(r.trade)}</td><td><a href="${usLink(r.sym)}" target="_blank" rel="noopener"><b>${esc(r.sym)}</b></a> <span class="sm">${esc(r.co)}</span></td><td class="sm">${esc(r.title)}</td><td class="r">$${fmt(r.price, 2)}</td><td class="r up">$${fmt((r.value || 0) / 1e3, 0)}K</td><td class="r sm">${esc(r.chg)}</td></tr>`).join('');
   const br = D.breadth.map(([d, v]) => [ymdDash(d), Math.round((v.up / Math.max(1, v.up + v.down)) * 1000) / 10]);
-  return `${mk('KOSPI', '코스피')}${mk('KOSDAQ', '코스닥')}${smFlowCards()}
-  <section class="card c6"><h2>미국 선물 포지션 (CFTC)</h2><p class="sub">투기 세력(비상업) 순매수 계약 수 · 매주 금요일 발표(화요일 기준) · 위치 = 최근 3년 범위 안 0~100 · 줄을 누르면 차트</p>
+  const fs = state.flowSub, seg = `<section class="card" style="padding:10px 14px"><span class="seg" id="fseg">${[['inv', '투자자별 매매'], ['etf', 'ETF 자금 흐름'], ['us', '미국 선물·내부자']].map(([k, n]) => `<button data-s="${k}" class="${fs === k ? 'on' : ''}">${n}</button>`).join('')}</span></section>`;
+  if (fs === 'etf') return seg + etfView();
+  if (fs === 'us') return `${seg}
+  <section class="card"><h2>미국 선물 포지션 (CFTC)</h2><p class="sub">투기 세력(비상업) 순매수 계약 수 · 매주 금요일 발표(화요일 기준) · 위치 = 최근 3년 범위 안 0~100 · 줄을 누르면 차트</p>
     <div class="tw"><table class="tbl"><thead><tr><th>계약</th><th class="r">순포지션</th><th class="r">전주 대비</th><th class="r">위치</th></tr></thead><tbody>${cot || '<tr><td colspan="4" class="empty">자료 없음</td></tr>'}</tbody></table></div></section>
-  <section class="card c6"><h2>오른 종목 비율</h2><p class="sub">코스피+코스닥 · 수집 시작 뒤부터 쌓임</p>${lineChart([{ name: '오른 종목 %', color: '#d6336c', pts: br }], { h: 170, band: [0, 100] })}</section>
   <section class="card"><h2>미국 내부자 매수</h2><p class="sub">임원·대주주의 장내 매수 신고(SEC Form 4) 중 2.5만 달러 이상 · OpenInsider 정리 · ${D.insider ? kstTime(D.insider.at) : ''}</p>
     <div class="tw"><table class="tbl"><thead><tr><th>거래일</th><th>종목</th><th>직위</th><th class="r">가격</th><th class="r">금액</th><th class="r">보유 변화</th></tr></thead><tbody>${ins || '<tr><td colspan="6" class="empty">자료 없음</td></tr>'}</tbody></table></div></section>`;
+  return `${seg}${mk('KOSPI', '코스피')}${mk('KOSDAQ', '코스닥')}${smFlowCards()}
+  <section class="card"><h2>오른 종목 비율</h2><p class="sub">코스피+코스닥 · 수집 시작 뒤부터 쌓임</p>${lineChart([{ name: '오른 종목 %', color: '#d6336c', pts: br }], { h: 170, band: [0, 100] })}</section>
+`;
 };
 
 VIEW.macro = () => {
@@ -556,7 +592,7 @@ function render() {
   $('#main').innerHTML = (VIEW[t] || VIEW.home)();
   window.scrollTo(0, 0);
 }
-function go(t, sub) { state.tab = t; if (t === 'stock') { state.stock = sub || null; state.stockErr = ''; } else if (t === 'ai') { if (sub) state.aiSub = sub; } else if (sub) state.mkt = sub; history.replaceState(null, '', '#' + t + (sub ? '/' + sub : '')); render(); }
+function go(t, sub) { state.tab = t; if (t === 'stock') { state.stock = sub || null; state.stockErr = ''; } else if (t === 'ai') { if (sub) state.aiSub = sub; } else if (t === 'flow') { if (sub) state.flowSub = sub; } else if (sub) state.mkt = sub; history.replaceState(null, '', '#' + t + (sub ? '/' + sub : '')); render(); }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-t]'); if (b && b.closest('nav')) return go(b.dataset.t);
   const nv = e.target.closest('a[href^="https://m.stock.naver.com/domestic/stock/"]'); if (nv && !nv.dataset.ext) { const code = nv.getAttribute('href').split('/stock/')[1].split('/')[0]; if (STK[code]) { e.preventDefault(); return go('stock', code); } }
@@ -568,6 +604,9 @@ document.addEventListener('click', (e) => {
   if (e.target.id === 'sdir') { state.sdir *= -1; return render(); }
   const spr = e.target.closest('#sper button'); if (spr) { state.sper = +spr.dataset.n; const y = window.scrollY; render(); return window.scrollTo(0, y); }
   const ais = e.target.closest('#aiseg button'); if (ais) return go('ai', ais.dataset.s);
+  const fsg = e.target.closest('#fseg button'); if (fsg) return go('flow', fsg.dataset.s);
+  for (const [id, key] of [['etfk', 'etfKey'], ['etfi', 'etfInv'], ['etfu', 'etfUs']]) { const bt = e.target.closest('#' + id + ' button'); if (bt) { state[key] = bt.dataset.k; const y = window.scrollY; render(); return window.scrollTo(0, y); } }
+  const ue = e.target.closest('tr[data-usetf]'); if (ue) return openUsEtf(ue.dataset.usetf);
   const g = e.target.closest('[data-go]'); if (g) { if (g.dataset.kw) state.kw = g.dataset.kw; return go(g.dataset.go, g.dataset.sub); }
   const g2 = e.target.closest('[data-go2]'); if (g2) return go(g2.dataset.go2);
   const tl = e.target.closest('.tile[data-k], tr[data-k]'); if (tl) return openSeries(tl.dataset.k);
@@ -594,5 +633,5 @@ document.addEventListener('input', (e) => {   // 검색: 입력 칸은 그대로
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'rq') requestReport(e.target.value); });
 $('#stamp').innerHTML = `자료 ${kstTime(D.updated)} 수집${D.failures.length ? ` · <span title="${esc(D.failures.join('\n'))}">일부 출처 실패 ${D.failures.length}</span>` : ''}`;
-{ const [t, sub] = (location.hash.slice(1) || 'home').split('/'); state.tab = VIEW[t] ? t : 'home'; if (state.tab === 'stock') state.stock = sub || null; else if (state.tab === 'ai') { if (sub) state.aiSub = sub; } else if (sub) state.mkt = sub; }
+{ const [t, sub] = (location.hash.slice(1) || 'home').split('/'); state.tab = VIEW[t] ? t : 'home'; if (state.tab === 'stock') state.stock = sub || null; else if (state.tab === 'ai') { if (sub) state.aiSub = sub; } else if (state.tab === 'flow') { if (sub) state.flowSub = sub; } else if (sub) state.mkt = sub; }
 render();

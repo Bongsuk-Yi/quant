@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync
 import { join } from 'node:path';
 import { sitePassword, encrypt, decryptNode, makeKey, gatePage, LOCK_SNIPPET } from './gate.mjs';
 import { buildStocks, buildStockReports } from './stocks.mjs';
-import { seriesSummary, flowSummary, krFearGreed, rating, temperature, anomalies, clusterNews, hotKeywords, calendar, cotSummary, fredSummary } from './analyze.mjs';
+import { seriesSummary, flowSummary, krFearGreed, rating, temperature, anomalies, clusterNews, hotKeywords, calendar, cotSummary, fredSummary, etfSummary } from './analyze.mjs';
 
 const root = new URL('..', import.meta.url).pathname, dist = join(root, 'dist');
 const pw = sitePassword(), STORE_KEY = 'quant.pw';
@@ -37,7 +37,7 @@ const D = {
   kr: S.kr || {}, industries: S.industries, themes: S.themes, usIndustries: S.usIndustries || [], movers: S.movers || {},
   events: clusterNews(S.news || [], 24).slice(0, 40), events3d: clusterNews(S.news || [], 72).slice(0, 120), keywords: hotKeywords(S.news || [], 24),
   news: (S.news || []).slice(0, 300).map(({ title, url, src, ts }) => ({ title, url, src, ts })),
-  stocks, stockReports, repo: process.env.GITHUB_REPOSITORY || 'Bongsuk-Yi/quant',
+  stocks, stockReports, etf: etfSummary(S), repo: process.env.GITHUB_REPOSITORY || 'Bongsuk-Yi/quant',
   calendar: calendar(S), cot: cotSummary(S), fred: fredSummary(S), fredKey: !!S.fredKey, options: S.options || null, community: S.community || null, smFlow: S.smFlow || null, insider: S.insider, reports,
 };
 

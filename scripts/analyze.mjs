@@ -233,3 +233,41 @@ export function fredSummary(S) {
   }
   return out;
 }
+
+/* ── ETF 자금 흐름 요약 ── */
+const ETF_TAB = { 1: '국내 시장지수', 2: '국내 업종·테마', 3: '국내 파생(레버리지·인버스)', 4: '해외 주식', 5: '원자재', 6: '채권', 7: '기타(금리·혼합 등)' };
+const US_NAME = { SPY: 'S&P 500', XLK: '기술', XLF: '금융', XLV: '헬스케어', XLY: '경기소비재', XLC: '커뮤니케이션', XLI: '산업재', XLE: '에너지', XLP: '필수소비재', XLU: '유틸리티', XLB: '소재', XLRE: '부동산', XBI: '바이오텍', KRE: '지역은행', XOP: '석유·가스 개발', XHB: '주택건설', XME: '금속·광업', MDY: '중형주 400', DIA: '다우 30',
+  QQQ: '나스닥 100', IVV: 'S&P 500 (iShares)', VOO: 'S&P 500 (Vanguard)', VTI: '미국 전체 주식', IWM: '러셀 2000', EFA: '선진국(미국 제외)', EEM: '신흥국', EWY: '한국', EWJ: '일본', FXI: '중국 대형주', KWEB: '중국 인터넷', INDA: '인도', TLT: '미국 장기채(20년+)', IEF: '미국 중기채(7~10년)', SHY: '미국 단기채(1~3년)', LQD: '투자등급 회사채', HYG: '하이일드 회사채', AGG: '미국 종합채권', GLD: '금', SLV: '은', USO: '원유', SMH: '반도체(VanEck)', SOXX: '반도체(iShares)', ARKK: 'ARK 혁신', IBIT: '비트코인', VNQ: '미국 리츠' };
+export function etfSummary(S) {
+  const E = S.etf; if (!E?.kr) return null;
+  const dates = Object.keys(E.kr.snap || {}).sort(), lastD = dates.at(-1), snapL = E.kr.snap[lastD] || {};
+  const total = dates.slice(1).map((d) => [d, 0]), items = [];
+  for (const [code, cur] of Object.entries(snapL)) {
+    const m = E.kr.meta?.[code]; if (!m) continue;
+    const fl = [];   // 날짜별 자금 흐름(억원). 좌수는 억원 단위 시가총액에서 역산하므로 1.5억 미만 변화는 반올림 오차로 보고 0 처리
+    for (let i = 1; i < dates.length; i++) {
+      const a = E.kr.snap[dates[i - 1]][code], b = E.kr.snap[dates[i]][code]; let f = 0;
+      if (a && b) { f = (b[0] - a[0]) * b[1] / 1e8; if (Math.abs(f) < 1.5) f = 0; }
+      fl.push(f); total[i - 1][1] += f;
+    }
+    const sum = (n) => Math.round(fl.slice(-n).reduce((s, x) => s + x, 0));
+    items.push({ code, name: m.name, tab: m.tab, mcap: cur[2], pct: m.pct, price: m.price, f1: sum(1), f5: sum(5), f20: sum(20) });
+  }
+  const tabs = Object.entries(ETF_TAB).map(([k, name]) => { const g = items.filter((x) => x.tab === +k); return { name, n: g.length, mcap: g.reduce((s, x) => s + x.mcap, 0), f1: g.reduce((s, x) => s + x.f1, 0), f5: g.reduce((s, x) => s + x.f5, 0), f20: g.reduce((s, x) => s + x.f20, 0) }; }).filter((t) => t.n);
+  const keep = new Set([...[...items].sort((a, b) => b.mcap - a.mcap).slice(0, 80), ...[...items].sort((a, b) => Math.abs(b.f5) - Math.abs(a.f5)).slice(0, 80), ...[...items].sort((a, b) => Math.abs(b.f1) - Math.abs(a.f1)).slice(0, 40)].map((x) => x.code));
+  const inv = Object.entries(E.kr.trend || {}).map(([code, rows]) => {
+    const m = E.kr.meta?.[code] || {}, amt = (k, n) => Math.round(rows.slice(-n).reduce((s, r) => s + (r[k] || 0) * (r.c || 0), 0) / 1e8);
+    return { code, name: m.name || code, mcap: m.mcap || 0, d: rows.at(-1)?.d, f1: amt('f', 1), o1: amt('o', 1), p1: amt('p', 1), f5: amt('f', 5), o5: amt('o', 5), p5: amt('p', 5), f20: amt('f', 20), o20: amt('o', 20), p20: amt('p', 20) };
+  }).sort((a, b) => b.mcap - a.mcap);
+  const us = [];
+  for (const [t, rows] of Object.entries(E.us?.ssga || {})) {
+    const fl = rows.slice(1).map((r, i) => [r[0], (r[2] - rows[i][2]) * r[1] / 1e6]);   // 백만 달러
+    const sum = (n) => Math.round(fl.slice(-n).reduce((s, x) => s + x[1], 0)), last = rows.at(-1), aum = (last[3] || last[1] * last[2]) / 1e6;
+    let c = 0; us.push({ t, name: US_NAME[t] || t, src: 'SSGA', d: last[0], aum: Math.round(aum), f1: sum(1), f5: sum(5), f20: sum(20), f60: sum(60), p20: aum ? round(sum(20) / aum * 100, 2) : null, hist: fl.slice(-120).map((x) => [x[0], Math.round(c += x[1])]) });
+  }
+  for (const [t, rows] of Object.entries(E.us?.nq || {})) {
+    const fl = rows.slice(1).map((r, i) => [r[0], (r[1] - rows[i][1] * (r[2] / rows[i][2])) / 1e6]), sum = (n) => Math.round(fl.slice(-n).reduce((s, x) => s + x[1], 0)), last = rows.at(-1), aum = last[1] / 1e6;
+    let c = 0; us.push({ t, name: US_NAME[t] || t, src: 'Nasdaq', est: true, n: fl.length, d: last[0], aum: Math.round(aum), f1: fl.length ? sum(1) : null, f5: fl.length ? sum(5) : null, f20: fl.length ? sum(20) : null, f60: null, p20: fl.length && aum ? round(sum(20) / aum * 100, 2) : null, hist: fl.map((x) => [x[0], Math.round(c += x[1])]) });
+  }
+  return { kr: { dates, days: Math.max(0, dates.length - 1), lastD, count: items.length, mcap: items.reduce((s, x) => s + x.mcap, 0), total: total.map(([d, v]) => [d, Math.round(v)]), tabs, list: items.filter((x) => keep.has(x.code)), inv, trendAt: E.kr.trendAt }, us, usAt: E.us?.ssgaAt || E.us?.nqAt };
+}

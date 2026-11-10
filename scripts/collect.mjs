@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { sitePassword, encrypt, decryptNode } from './gate.mjs';
 import { FRED } from './analyze.mjs';
-import { get, tryGet, failures, num, sleep, kstNow, kstDate, ymd, dash, addDays, weekday, parseRss } from './lib.mjs';
+import { get, tryGet, failures, num, sleep, kstNow, kstDate, ymd, dash, addDays, weekday, parseRss, xlsxRows } from './lib.mjs';
 
 const FILE = process.argv[2] || 'store.enc.json';
 const pw = sitePassword();
@@ -328,6 +328,73 @@ try {
   if (rows.length > 50) S.smFlow = { at: X.updated, d: lastD, n: rows.length, sectors, buy: [...rows].sort((a, b) => tot(b) - tot(a)).slice(0, 25), sell: [...rows].sort((a, b) => tot(a) - tot(b)).slice(0, 25) };
   log(`  종목 ${rows.length} · 업종 ${sectors.length} · 기준 ${lastD}`);
 } catch (e) { failures.push(`stock-monitoring 자료: ${e.message}`); log('  ✗', e.message); }
+
+/* ── 14. ETF 자금 흐름 ── 자금 흐름 = 상장좌수 증감 × 순자산가치(NAV)
+   한국: 네이버 ETF 목록(가격·NAV·시가총액) → 좌수 = 시가총액 ÷ 가격. 거래가 있는 날 스냅숏을 쌓는다 (45일 보관)
+         + 시가총액 상위 40개 ETF의 투자자별 순매수(네이버 종목 수급)
+   미국: SPDR 계열은 운용사(SSGA) NAV 이력 파일(좌수·순자산 과거 이력 포함)
+         그 외는 Nasdaq 요약의 순자산 스냅숏 → 순자산 변화 − 가격 변동분 (추정) */
+log('▶ ETF 자금 흐름');
+S.etf ??= {}; S.etf.kr ??= { meta: {}, snap: {}, trend: {} }; S.etf.us ??= { ssga: {}, nq: {} };
+{
+  const E = S.etf.kr, txt = await tryGet('naver etf 목록', 'https://finance.naver.com/api/sise/etfItemList.nhn?etfType=0&targetColumn=market_sum&sortOrder=desc', { encoding: 'euc-kr', tries: 2, headers: { Referer: 'https://finance.naver.com/sise/etf.naver' } });
+  let list = []; try { list = JSON.parse(txt || '{}').result?.etfItemList || []; } catch (_) {}
+  const kDate = S.kr?.KOSPI?.at?.slice(0, 10);
+  if (list.length > 100) {
+    E.meta = {}; for (const it of list) E.meta[it.itemcode] = { name: it.itemname, tab: it.etfTabCode, price: it.nowVal, pct: it.changeRate, mcap: it.marketSum };
+    if (kDate === today || !Object.keys(E.snap).length) {   // 오늘 장이 열렸을 때만 그날 스냅숏으로 기록(처음 한 번은 기준점으로 저장)
+      const snap = {}; for (const it of list) if (it.nowVal > 0 && it.marketSum >= 50) snap[it.itemcode] = [Math.round(it.marketSum * 1e8 / it.nowVal), it.nav || it.nowVal, it.marketSum];
+      E.snap[kDate || today] = snap;
+      for (const d of Object.keys(E.snap).sort().slice(0, -45)) delete E.snap[d];
+    }
+    if (!E.trendAt || Date.now() - Date.parse(E.trendAt) > 3 * 3600e3) {
+      const top = [...list].sort((a, b) => b.marketSum - a.marketSum).slice(0, 40); let ok = 0;
+      for (const it of top) {
+        const arr = await tryGet(`etf 수급 ${it.itemcode}`, `${M}/stock/${it.itemcode}/trend?pageSize=30`, { tries: 2 });
+        if (Array.isArray(arr) && arr.length) { E.trend[it.itemcode] = arr.map((x) => ({ d: String(x.bizdate), f: num(x.foreignerPureBuyQuant), o: num(x.organPureBuyQuant), p: num(x.individualPureBuyQuant), c: num(x.closePrice) })).sort((a, b) => (a.d < b.d ? -1 : 1)); ok++; }
+        await sleep(120);
+      }
+      for (const c of Object.keys(E.trend)) if (!top.some((t) => t.itemcode === c)) delete E.trend[c];
+      if (ok) E.trendAt = new Date().toISOString();
+    }
+  }
+  log(`  한국 ETF ${list.length} · 스냅숏 ${Object.keys(E.snap).length}일 · 투자자별 ${Object.keys(E.trend).length}`);
+}
+{
+  const U = S.etf.us;
+  const SSGA = ['SPY', 'XLK', 'XLF', 'XLV', 'XLY', 'XLC', 'XLI', 'XLE', 'XLP', 'XLU', 'XLB', 'XLRE', 'XBI', 'KRE', 'XOP', 'XHB', 'XME', 'MDY', 'DIA'];
+  if (!U.ssgaAt || Date.now() - Date.parse(U.ssgaAt) > 6 * 3600e3) {
+    let ok = 0, shown = false;
+    for (const t of SSGA) {
+      try {
+        const rows = xlsxRows(await get(`https://www.ssga.com/us/en/intermediary/etfs/library-content/products/fund-data/etfs/us/navhist-us-en-${t.toLowerCase()}.xlsx`, { buffer: true, tries: 2, timeout: 60000 }));
+        const hi = rows.findIndex((r) => r.some((c) => /^nav$/i.test(String(c || '').trim())) && r.some((c) => /shares outstanding/i.test(String(c || ''))));
+        if (hi < 0) throw new Error('머리글(NAV·Shares Outstanding)을 찾지 못함: ' + JSON.stringify(rows.slice(0, 6)).slice(0, 300));
+        const H = rows[hi].map((c) => String(c || '').trim()), ci = (re) => H.findIndex((c) => re.test(c));
+        const cD = Math.max(0, ci(/date/i)), cN = ci(/^nav$/i), cS = ci(/shares outstanding/i), cA = ci(/total net assets/i);
+        if (!shown) { log('  SSGA 머리글:', JSON.stringify(H), '첫 줄:', JSON.stringify(rows[hi + 1])); shown = true; }
+        const toDate = (v) => { const n = Number(v); const ms = Number.isFinite(n) && n > 20000 ? Date.UTC(1899, 11, 30) + n * 864e5 : Date.parse(String(v) + ' UTC'); return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null; };
+        const data = rows.slice(hi + 1).map((r) => [toDate(r[cD]), num(r[cN]), num(r[cS]), cA >= 0 ? num(r[cA]) : null]).filter((r) => r[0] && r[1] > 0 && r[2] > 0).sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-300);
+        if (data.length > 5) { U.ssga[t] = data; ok++; } else throw new Error('자료 줄이 없음');
+      } catch (e) { failures.push(`ssga ${t}: ${String(e.message).slice(0, 200)}`); log('  ✗ ssga', t, String(e.message).slice(0, 300)); if (!ok && failures.filter((f) => f.startsWith('ssga')).length >= 3) break; }
+      await sleep(300);
+    }
+    if (ok) U.ssgaAt = new Date().toISOString();
+    log(`  미국 SPDR ${ok}/${SSGA.length}`);
+  }
+  const NQ = ['QQQ', 'IVV', 'VOO', 'VTI', 'IWM', 'EFA', 'EEM', 'EWY', 'EWJ', 'FXI', 'KWEB', 'INDA', 'TLT', 'IEF', 'SHY', 'LQD', 'HYG', 'AGG', 'GLD', 'SLV', 'USO', 'SMH', 'SOXX', 'ARKK', 'IBIT', 'VNQ'];
+  if (!U.nqAt || Date.now() - Date.parse(U.nqAt) > 3 * 3600e3) {
+    let ok = 0; const NQH2 = { Accept: 'application/json, text/plain, */*', Origin: 'https://www.nasdaq.com', Referer: 'https://www.nasdaq.com/' };
+    for (const t of NQ) {
+      const j = await tryGet(`nasdaq etf ${t}`, `https://api.nasdaq.com/api/quote/${t}/summary?assetclass=etf`, { headers: NQH2, tries: 2 });
+      const sd = j?.data?.summaryData, aum = num(sd?.AUM?.value), px = num(sd?.PreviousClose?.value);
+      if (aum > 0 && px > 0) { const arr = (U.nq[t] ??= []), last = arr.at(-1); if (!last || last[1] !== aum * 1000) arr.push([new Date().toISOString().slice(0, 10), aum * 1000, px]); if (arr.length > 90) arr.splice(0, arr.length - 90); ok++; }
+      await sleep(200);
+    }
+    if (ok) U.nqAt = new Date().toISOString();
+    log(`  미국 기타 ${ok}/${NQ.length}`);
+  }
+}
 
 S.updated = new Date().toISOString();
 S.failures = failures.slice(0, 60);
