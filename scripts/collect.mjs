@@ -363,6 +363,7 @@ S.etf ??= {}; S.etf.kr ??= { meta: {}, snap: {}, trend: {} }; S.etf.us ??= { ssg
 {
   const U = S.etf.us;
   const SSGA = ['SPY', 'XLK', 'XLF', 'XLV', 'XLY', 'XLC', 'XLI', 'XLE', 'XLP', 'XLU', 'XLB', 'XLRE', 'XBI', 'KRE', 'XOP', 'XHB', 'XME', 'MDY', 'DIA'];
+  if (U.ssgaV !== 2) { U.ssgaAt = null; U.ssga = {}; U.ssgaV = 2; }   // 숫자 읽기 방식을 고친 뒤 다시 받기
   if (!U.ssgaAt || Date.now() - Date.parse(U.ssgaAt) > 6 * 3600e3) {
     let ok = 0, shown = false;
     for (const t of SSGA) {
@@ -374,7 +375,8 @@ S.etf ??= {}; S.etf.kr ??= { meta: {}, snap: {}, trend: {} }; S.etf.us ??= { ssg
         const cD = Math.max(0, ci(/date/i)), cN = ci(/^nav$/i), cS = ci(/shares outstanding/i), cA = ci(/total net assets/i);
         if (!shown) { log('  SSGA 머리글:', JSON.stringify(H), '첫 줄:', JSON.stringify(rows[hi + 1])); shown = true; }
         const toDate = (v) => { const n = Number(v); const ms = Number.isFinite(n) && n > 20000 ? Date.UTC(1899, 11, 30) + n * 864e5 : Date.parse(String(v) + ' UTC'); return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null; };
-        const data = rows.slice(hi + 1).map((r) => [toDate(r[cD]), num(r[cN]), num(r[cS]), cA >= 0 ? num(r[cA]) : null]).filter((r) => r[0] && r[1] > 0 && r[2] > 0).sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-300);
+        const nf = (v) => { const n = Number(String(v ?? '').replace(/[$,\s]/g, '')); return Number.isFinite(n) ? n : null; };   // 1.05E9 같은 지수 표기도 읽는다
+        const data = rows.slice(hi + 1).map((r) => [toDate(r[cD]), nf(r[cN]), nf(r[cS]), cA >= 0 ? nf(r[cA]) : null]).filter((r) => r[0] && r[1] > 0 && r[2] > 0).sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-300);
         if (data.length > 5) { U.ssga[t] = data; ok++; } else throw new Error('자료 줄이 없음');
       } catch (e) { failures.push(`ssga ${t}: ${String(e.message).slice(0, 200)}`); log('  ✗ ssga', t, String(e.message).slice(0, 300)); if (!ok && failures.filter((f) => f.startsWith('ssga')).length >= 3) break; }
       await sleep(300);
