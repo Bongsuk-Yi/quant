@@ -31,7 +31,7 @@ const D = {
   kr: S.kr || {}, industries: S.industries, themes: S.themes, usIndustries: S.usIndustries || [], movers: S.movers || {},
   events: clusterNews(S.news || [], 24).slice(0, 40), events3d: clusterNews(S.news || [], 72).slice(0, 120), keywords: hotKeywords(S.news || [], 24),
   news: (S.news || []).slice(0, 300).map(({ title, url, src, ts }) => ({ title, url, src, ts })),
-  calendar: calendar(S), cot: cotSummary(S), fred: fredSummary(S), options: S.options || null, community: S.community || null, smFlow: S.smFlow || null, insider: S.insider, reports,
+  calendar: calendar(S), cot: cotSummary(S), fred: fredSummary(S), fredKey: !!S.fredKey, options: S.options || null, community: S.community || null, smFlow: S.smFlow || null, insider: S.insider, reports,
 };
 
 rmSync(dist, { recursive: true, force: true }); mkdirSync(dist, { recursive: true });

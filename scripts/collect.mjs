@@ -233,14 +233,28 @@ if (oi) {
   log(`  내부자 매수 ${rows.length}`);
 }
 
-/* ── 10. FRED: 기준금리·SOFR·국채·회사채·거시 지표 (6시간마다) ── */
-if (!S.fredAt || Date.now() - Date.parse(S.fredAt) > 6 * 3600e3) {
-  log('▶ FRED'); S.fred ??= {}; let ok = 0;
+/* ── 10. 금리·거시 지표 ──
+   (가) 뉴욕 연준 공개 API(키 없음): SOFR, 실효 연방기금금리, 기준금리 목표 상단 — 매번
+   (나) FRED 공식 API(무료 키 FRED_API_KEY 필요): 국채·회사채 가산금리·거시 지표 — 6시간마다
+        ※ 키 없는 FRED CSV 주소는 GitHub Actions에서 응답하지 않아 쓰지 않는다 */
+log('▶ 금리(뉴욕 연준)'); S.fred ??= {};
+for (const [k, path] of [['SOFR', 'secured/sofr'], ['DFF', 'unsecured/effr']]) {
+  const j = await tryGet(`nyfed ${k}`, `https://markets.newyorkfed.org/api/rates/${path}/last/400.json`, { tries: 2 });
+  const rows = (j?.refRates || []).map((r) => [r.effectiveDate, num(r.percentRate), num(r.targetRateTo)]).filter((r) => r[1] != null).sort();
+  if (rows.length > 2) { S.fred[k] = rows.map((r) => [r[0], r[1]]); if (k === 'DFF' && rows.some((r) => r[2] != null)) S.fred.FFU = rows.filter((r) => r[2] != null).map((r) => [r[0], r[2]]); }
+}
+const FKEY = (process.env.FRED_API_KEY || '').trim();
+S.fredKey = !!FKEY;
+if (FKEY && (!S.fredAt || Date.now() - Date.parse(S.fredAt) > 6 * 3600e3)) {
+  log('▶ FRED'); let ok = 0, bad = 0;
   for (const [k, id] of FRED) {
-    const csv = await tryGet(`fred ${id}`, `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${addDays(today, -1500)}`, { json: false, tries: 2, timeout: 40000 });
-    const rows = (csv || '').trim().split('\n').slice(1).map((l) => l.split(',')).map((x) => [x[0], parseFloat(x[1])]).filter((x) => /^\d{4}-\d\d-\d\d$/.test(x[0]) && Number.isFinite(x[1]));
-    if (rows.length > 2) { S.fred[k] = rows; ok++; }
-    await sleep(300);
+    if (bad >= 3 && !ok) break;   // 처음부터 계속 실패하면 그만둔다
+    let j = null;
+    try { j = await get(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${FKEY}&file_type=json&observation_start=${addDays(today, -1500)}`, { tries: 2, timeout: 20000 }); }
+    catch (e) { failures.push(`fred ${id}: ${String(e.message).replace(FKEY, '***').slice(-60)}`); }
+    const rows = (j?.observations || []).map((o) => [o.date, parseFloat(o.value)]).filter((x) => Number.isFinite(x[1]));
+    if (rows.length > 2) { S.fred[k] = rows; ok++; } else bad++;
+    await sleep(250);
   }
   if (ok) S.fredAt = new Date().toISOString();
   log(`  FRED 계열 ${ok}/${FRED.length}`);

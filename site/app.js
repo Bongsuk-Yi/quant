@@ -156,7 +156,7 @@ function themeRow(g) {
 /* ── 추가 화면 조각: FRED 지표, 옵션 기대 변동폭, 커뮤니티 관심, 종목 수급 ── */
 const fredRows = (grp) => (D.fred || []).filter((x) => x.grp === grp);
 function fredTable(grp) {
-  const rows = fredRows(grp); if (!rows.length) return '<p class="note">자료를 아직 받지 못했습니다.</p>';
+  const rows = fredRows(grp); if (!rows.length) return D.fredKey ? '<p class="note">자료를 아직 받지 못했습니다.</p>' : '<p class="warn">이 표는 FRED 무료 키가 있어야 채워집니다. fred.stlouisfed.org에서 API 키를 받아 저장소 Secret <b>FRED_API_KEY</b>로 등록하세요.</p>';
   return `<div class="tw"><table class="tbl"><thead><tr><th>항목</th><th class="r">값</th><th class="r">직전 대비</th><th class="r">1년 전 대비</th><th>기준일</th></tr></thead><tbody>${rows.map((x) => `<tr data-fred="${x.k}" style="cursor:pointer"><td>${esc(x.name)}</td><td class="r">${fmt(x.v, 2)}${esc(x.unit)}</td><td class="r ${cls(x.chg)}">${x.chg > 0 ? '+' : ''}${fmt(x.chg, 2)}</td><td class="r ${cls(x.y1)}">${x.y1 > 0 ? '+' : ''}${fmt(x.y1, 2)}</td><td class="sm n">${esc(x.d)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function openFred(k) { const x = (D.fred || []).find((y) => y.k === k); if (x) modal(`${esc(x.name)} <small>FRED ${esc(x.id)} · ${x.d}</small>`, lineChart([{ name: x.name, color: '#3b5bdb', pts: x.hist }], { h: 240, yfmt: (v) => fmt(v, 2) })); }
