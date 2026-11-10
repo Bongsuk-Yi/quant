@@ -1,7 +1,8 @@
 // 사이트 빌드: store.enc.json + reports/ → 화면 자료 계산 → 페이지 HTML 에 넣고 통째로 암호화 → dist/index.html
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { sitePassword, encrypt, decryptNode, gatePage, LOCK_SNIPPET } from './gate.mjs';
+import { sitePassword, encrypt, decryptNode, makeKey, gatePage, LOCK_SNIPPET } from './gate.mjs';
+import { buildStocks, buildStockReports } from './stocks.mjs';
 import { seriesSummary, flowSummary, krFearGreed, rating, temperature, anomalies, clusterNews, hotKeywords, calendar, cotSummary, fredSummary } from './analyze.mjs';
 
 const root = new URL('..', import.meta.url).pathname, dist = join(root, 'dist');
@@ -24,6 +25,11 @@ if (existsSync(rdir)) {
   reports.push(...[...byId.values()].sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 30));
 }
 
+rmSync(dist, { recursive: true, force: true }); mkdirSync(dist, { recursive: true });
+const K = makeKey(pw);   // 종목·리포트 파일은 같은 키를 써서 브라우저가 키를 한 번만 만든다
+const stocks = buildStocks(join(root, 'sm.enc.json'), dist, pw, K);
+const stockReports = buildStockReports({ dist, pw, K, own: join(root, 'reports', 's'), sm: join(root, 'smrep') });
+
 const D = {
   built: new Date().toISOString(), updated: S.updated, failures: S.failures || [],
   sum, flows, breadth: Object.entries(S.breadth || {}).sort().slice(-60),
@@ -31,10 +37,11 @@ const D = {
   kr: S.kr || {}, industries: S.industries, themes: S.themes, usIndustries: S.usIndustries || [], movers: S.movers || {},
   events: clusterNews(S.news || [], 24).slice(0, 40), events3d: clusterNews(S.news || [], 72).slice(0, 120), keywords: hotKeywords(S.news || [], 24),
   news: (S.news || []).slice(0, 300).map(({ title, url, src, ts }) => ({ title, url, src, ts })),
+  stocks, stockReports, repo: process.env.GITHUB_REPOSITORY || 'Bongsuk-Yi/quant',
   calendar: calendar(S), cot: cotSummary(S), fred: fredSummary(S), fredKey: !!S.fredKey, options: S.options || null, community: S.community || null, smFlow: S.smFlow || null, insider: S.insider, reports,
 };
 
-rmSync(dist, { recursive: true, force: true }); mkdirSync(dist, { recursive: true });
+
 const ver = Date.now().toString(36);
 const css = readFileSync(join(root, 'site', 'styles.css'), 'utf8'), js = readFileSync(join(root, 'site', 'app.js'), 'utf8');
 const json = JSON.stringify(D).replace(/</g, '\\u003c');
@@ -46,4 +53,4 @@ let html = readFileSync(join(root, 'site', 'index.html'), 'utf8')
 writeFileSync(join(dist, 'index.html'), gatePage({ title: 'quant', mark: '🧭', storeKey: STORE_KEY, envelope: encrypt(html, pw), theme: 'light' }));
 writeFileSync(join(dist, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
 writeFileSync(join(dist, '.nojekyll'), '');
-console.log(`빌드 완료 v${ver} · 페이지 ${(html.length / 1024).toFixed(0)}KB · 계열 ${Object.keys(sum).length} · 사건 ${D.events.length} · 일정 ${D.calendar.length} · 리포트 ${reports.length} · 한국 공포탐욕 ${krfg?.score ?? '-'}`);
+console.log(`빌드 완료 v${ver} · 페이지 ${(html.length / 1024).toFixed(0)}KB · 계열 ${Object.keys(sum).length} · 사건 ${D.events.length} · 일정 ${D.calendar.length} · 리포트 ${reports.length} · 종목 ${stocks?.list.length ?? 0} · 종목 리포트 ${stockReports.length} · 한국 공포탐욕 ${krfg?.score ?? '-'}`);

@@ -58,6 +58,11 @@ jobs:
         run: |
           git fetch origin reports --depth=1 && git archive origin/reports | tar -x -C . --one-top-level=reports || echo "브리핑 없음"
 
+      - name: 종목 자료·기존 종목 리포트 가져오기 (수급분석 모니터링 저장소)
+        run: |
+          curl -fsSL --retry 2 --max-time 120 -o sm.enc.json https://raw.githubusercontent.com/Bongsuk-Yi/stock-monitoring/data/store.enc.json || { rm -f sm.enc.json; echo "::warning::종목 자료를 받지 못했습니다"; }
+          git clone -q --depth 1 -b reports https://github.com/Bongsuk-Yi/stock-monitoring.git smrep || echo "기존 종목 리포트 없음"
+
       - name: 빌드
         run: node scripts/build.mjs store.enc.json
 

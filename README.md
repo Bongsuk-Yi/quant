@@ -20,6 +20,11 @@
 - 외국인·기관이 산 업종·종목: `stock-monitoring` 저장소 `data` 브랜치의 종목별 수급 자료를 같은 비밀번호로 풀어 재사용
 - AI가 찾은 호재·악재: AI 리포트에 포함
 
+## 종목 검색·상세, AI 종목 분석 (3차)
+- 종목 자료는 `stock-monitoring` 저장소 `data` 브랜치(코스피 200 + 코스닥 150종목의 일봉·외국인/기관 수급)를 그대로 받아 씁니다.
+- 빌드 때 종목별 파일(`s/<코드>.enc.json`)로 나눠 암호화하고, 화면에서 종목을 열 때만 읽습니다.
+- AI 종목 분석: Actions → **AI 종목 분석** → Run workflow(종목 코드 입력). 결과는 `reports` 브랜치 `s/`에 암호화 저장. `stock-monitoring`에서 만든 리포트도 함께 보여 줍니다.
+
 ## 구성
 - `scripts/collect.mjs` 수집 → `store.enc.json`(암호화, `data` 브랜치에 누적)
 - `scripts/analyze.mjs` 계산 규칙(요약·평소 대비 z, 한국 공포탐욕, 뉴스 묶기, 일정)

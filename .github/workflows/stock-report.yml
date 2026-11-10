@@ -1,0 +1,126 @@
+name: AI 종목 분석
+
+on:
+  workflow_dispatch:
+    inputs:
+      code:
+        description: '종목 코드 (한국 6자리 예: 005930 / 미국 티커 예: NVDA)'
+        required: true
+        type: string
+      language:
+        description: '리포트 언어'
+        type: choice
+        options: [ko, en]
+        default: ko
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: ai-brief
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 종목 확인
+        id: t
+        env:
+          CODE_IN: ${{ inputs.code }}
+        run: |
+          code="$(echo "$CODE_IN" | tr -d ' ' | tr '[:lower:]' '[:upper:]')"
+          if [[ "$code" =~ ^[0-9A-Z]{6}$ && "$code" =~ [0-9] ]]; then market=KR
+            name="$(curl -fsS -A 'Mozilla/5.0' "https://m.stock.naver.com/api/stock/${code}/basic" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("stockName",""))' || true)"
+          elif [[ "$code" =~ ^[A-Z.\-]{1,10}$ ]]; then market=US
+            name="$(python3 -c 'import json,urllib.request,sys;r=urllib.request.Request("https://query1.finance.yahoo.com/v1/finance/search?q='"$code"'&quotesCount=1",headers={"User-Agent":"Mozilla/5.0"});q=json.load(urllib.request.urlopen(r))["quotes"];print((q[0].get("longname") or q[0].get("shortname")) if q else "")' || true)"
+          else echo "::error::종목 코드 형식이 아닙니다: $CODE_IN"; exit 1; fi
+          [ -z "$name" ] && name="$code"
+          echo "market=$market" >> "$GITHUB_OUTPUT"; echo "code=$code" >> "$GITHUB_OUTPUT"; echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "### $name ($code · $market) 리포트 생성" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 자료 수집 (네이버 증권 / Yahoo)
+        run: python3 scripts/report/collect_data.py --market "${{ steps.t.outputs.market }}" --code "${{ steps.t.outputs.code }}" --name "${{ steps.t.outputs.name }}" --out work/data
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Claude 로 리포트 작성 (5~15분)
+        working-directory: work
+        env:
+          NAME: ${{ steps.t.outputs.name }}
+          CODE: ${{ steps.t.outputs.code }}
+          MARKET: ${{ steps.t.outputs.market }}
+          LANG_IN: ${{ inputs.language }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "::error::GitHub Secret CLAUDE_CODE_OAUTH_TOKEN 이 없습니다 — PC에서 'claude setup-token' 으로 만든 토큰을 등록하세요."; exit 1; fi
+          npm i -g @anthropic-ai/claude-code >/dev/null 2>&1
+          mkdir -p out
+          lang=$([ "$LANG_IN" = en ] && echo "English" || echo "한국어")
+          python3 - "$lang" <<'PY'
+          import os, sys, datetime, zoneinfo
+          t = open("../prompts/stock.md", encoding="utf-8").read()
+          for k, v in {"NAME": os.environ["NAME"], "CODE": os.environ["CODE"], "MARKET": os.environ["MARKET"], "LANG": sys.argv[1],
+                       "TODAY": datetime.datetime.now(zoneinfo.ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")}.items():
+              t = t.replace("{{" + k + "}}", v)
+          open("prompt.txt", "w", encoding="utf-8").write(t)
+          PY
+          start=$(date +%s)
+          claude -p "$(cat prompt.txt)" \
+            --allowedTools "Read,Write,Glob,Grep,WebSearch,WebFetch" \
+            --output-format json ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"} > claude.json || { tail -c 2000 claude.json; echo "::error::Claude 실행 실패"; exit 1; }
+          python3 - "$start" <<'PY'
+          import json, os, sys, time, datetime, zoneinfo
+          r = json.load(open("claude.json"))
+          if r.get("is_error"):
+              print("::error::Claude 오류:", str(r.get("result"))[:1500]); sys.exit(1)
+          md = open("out/report.md", encoding="utf-8").read() if os.path.exists("out/report.md") else ""
+          if len(md) < 1500:
+              print("::error::리포트가 만들어지지 않았거나 너무 짧습니다:", len(md)); print(str(r.get("result"))[:1500]); sys.exit(1)
+          now = datetime.datetime.now(zoneinfo.ZoneInfo("Asia/Seoul"))
+          meta = {"market": os.environ["MARKET"], "code": os.environ["CODE"], "name": os.environ["NAME"], "lang": os.environ["LANG_IN"],
+                  "date": now.strftime("%Y%m%d"), "created": now.isoformat(timespec="seconds"),
+                  "seconds": round(time.time() - int(sys.argv[1])), "chars": len(md), "pdf": False, "engine": "claude",
+                  "model": ",".join((r.get("modelUsage") or {}).keys()) or os.environ.get("CLAUDE_MODEL") or "default"}
+          json.dump(meta, open("out/meta.json", "w"), ensure_ascii=False)
+          print("완료:", meta)
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(f"- 모델: {meta['model']} · {meta['chars']:,}자 · {meta['seconds']}초 · 턴 {r.get('num_turns')}\n")
+          PY
+
+      - name: 수집 자료·결과 보관 (확인용, 7일)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-work
+          path: |
+            work/data/brief.md
+            work/out/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: 암호화해서 reports 브랜치에 저장
+        run: |
+          git fetch origin reports --depth=1 && git worktree add rep origin/reports || { git worktree add --detach rep && (cd rep && git checkout -q --orphan reports-new && git rm -rfq . 2>/dev/null || true); }
+          node scripts/stock-pack.mjs work/out rep
+          cd rep
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add -A && git commit -qm "stock report ${{ steps.t.outputs.code }} $(TZ=Asia/Seoul date '+%F %T')"
+          git push origin HEAD:reports
+
+      - name: 사이트 다시 배포
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run update.yml -R ${{ github.repository }} -f collect=false
+          echo "완료 — 몇 분 안에 사이트의 종목 화면과 AI 종목 분석 목록에 나타납니다" >> "$GITHUB_STEP_SUMMARY"
