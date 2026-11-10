@@ -4,6 +4,7 @@
 //       CNN 공포탐욕, Nasdaq(경제 일정·실적 일정), CFTC(선물 포지션), OpenInsider(미국 내부자 매수), 언론사 RSS
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { sitePassword, encrypt, decryptNode } from './gate.mjs';
+import { FRED } from './analyze.mjs';
 import { get, tryGet, failures, num, sleep, kstNow, kstDate, ymd, dash, addDays, weekday, parseRss } from './lib.mjs';
 
 const FILE = process.argv[2] || 'store.enc.json';
@@ -231,6 +232,88 @@ if (oi) {
   if (rows.length) S.insider = { at: new Date().toISOString(), rows: rows.slice(0, 80) };
   log(`  내부자 매수 ${rows.length}`);
 }
+
+/* ── 10. FRED: 기준금리·SOFR·국채·회사채·거시 지표 (6시간마다) ── */
+if (!S.fredAt || Date.now() - Date.parse(S.fredAt) > 6 * 3600e3) {
+  log('▶ FRED'); S.fred ??= {}; let ok = 0;
+  for (const [k, id] of FRED) {
+    const csv = await tryGet(`fred ${id}`, `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${addDays(today, -1500)}`, { json: false, tries: 2, timeout: 40000 });
+    const rows = (csv || '').trim().split('\n').slice(1).map((l) => l.split(',')).map((x) => [x[0], parseFloat(x[1])]).filter((x) => /^\d{4}-\d\d-\d\d$/.test(x[0]) && Number.isFinite(x[1]));
+    if (rows.length > 2) { S.fred[k] = rows; ok++; }
+    await sleep(300);
+  }
+  if (ok) S.fredAt = new Date().toISOString();
+  log(`  FRED 계열 ${ok}/${FRED.length}`);
+}
+
+/* ── 11. 옵션 기대 변동폭 (CBOE 지연 시세, 3시간마다) ── */
+if (!S.options?.at || Date.now() - Date.parse(S.options.at) > 3 * 3600e3) {
+  log('▶ 옵션');
+  const OPT = [['SPY', 'S&P 500 ETF'], ['QQQ', '나스닥 100 ETF'], ['IWM', '러셀 2000 ETF'], ['NVDA', '엔비디아'], ['AAPL', '애플'], ['MSFT', '마이크로소프트'], ['AMZN', '아마존'], ['GOOGL', '알파벳'], ['META', '메타'], ['TSLA', '테슬라'], ['AMD', 'AMD'], ['AVGO', '브로드컴'], ['MU', '마이크론'], ['PLTR', '팔란티어'], ['TSM', 'TSMC']];
+  const list = [];
+  for (const [sym, name] of OPT) {
+    const j = await tryGet(`cboe ${sym}`, `https://cdn.cboe.com/api/global/delayed_quotes/options/${sym}.json`, { tries: 2, timeout: 60000 });
+    const d = j?.data; const price = num(d?.current_price) ?? num(d?.close);
+    if (!d?.options?.length || !price) continue;
+    const exps = {}; let cv = 0, pv = 0, co = 0, po = 0;
+    for (const o of d.options) {
+      const m = /^([A-Z.]+)(\d{6})([CP])(\d{8})$/.exec(o.option || ''); if (!m) continue;
+      const exp = `20${m[2].slice(0, 2)}-${m[2].slice(2, 4)}-${m[2].slice(4)}`, K = +m[4] / 1000, bid = num(o.bid), ask = num(o.ask);
+      const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : num(o.last_trade_price);
+      if (m[3] === 'C') { cv += o.volume || 0; co += o.open_interest || 0; } else { pv += o.volume || 0; po += o.open_interest || 0; }
+      ((exps[exp] ??= {})[K] ??= {})[m[3]] = { mid, iv: num(o.iv) };
+    }
+    const usToday = new Date(Date.now() - 5 * 3600e3).toISOString().slice(0, 10);
+    const dte = (e) => Math.round((Date.parse(e) - Date.parse(usToday)) / 864e5);
+    const keys = Object.keys(exps).sort().filter((e) => dte(e) >= 1);
+    const pick = [keys[0], keys.find((e) => dte(e) >= 6), keys.find((e) => dte(e) >= 25)].filter((e, i, a) => e && a.indexOf(e) === i);
+    const rows = [];
+    for (const e of pick) {
+      const ks = Object.keys(exps[e]).map(Number).filter((K) => exps[e][K].C?.mid > 0 && exps[e][K].P?.mid > 0).sort((a, b) => Math.abs(a - price) - Math.abs(b - price));
+      if (!ks.length) continue; const K = ks[0], st = exps[e][K].C.mid + exps[e][K].P.mid;
+      rows.push({ exp: e, dte: dte(e), K, straddle: +st.toFixed(2), em: +(st / price * 100).toFixed(2), iv: exps[e][K].C.iv ? +(((exps[e][K].C.iv + (exps[e][K].P.iv || exps[e][K].C.iv)) / 2) * 100).toFixed(1) : null });
+    }
+    if (rows.length) list.push({ sym, name, price, pct: num(d.percent_change) ?? num(d.price_change_percent), iv30: num(d.iv30), rows, pcrVol: cv ? +(pv / cv).toFixed(2) : null, pcrOI: co ? +(po / co).toFixed(2) : null, vol: cv + pv });
+    await sleep(300);
+  }
+  if (list.length) S.options = { at: new Date().toISOString(), list };
+  log(`  옵션 ${list.length}/${OPT.length}`);
+}
+
+/* ── 12. 커뮤니티 관심 (미국: ApeWisdom의 Reddit 언급 집계 / 한국: 네이버 검색 상위) ── */
+log('▶ 커뮤니티');
+{
+  const ape = await tryGet('apewisdom', 'https://apewisdom.io/api/v1.0/filter/all-stocks/page/1', { tries: 2 });
+  const us = (ape?.results || []).slice(0, 40).map((r) => ({ sym: r.ticker, name: r.name, m: +r.mentions, m0: +r.mentions_24h_ago || 0, rank: +r.rank, rank0: +r.rank_24h_ago || null, up: +r.upvotes }));
+  const kr = [];
+  for (const mk of ['KOSPI', 'KOSDAQ']) {
+    const j = await tryGet(`naver searchTop ${mk}`, `${M}/stocks/searchTop/${mk}?page=1&pageSize=20`, { tries: 1 });
+    for (const st of j?.stocks || []) kr.push({ code: st.itemCode, name: st.stockName, mk, price: num(st.closePrice), pct: num(st.fluctuationsRatio) });
+  }
+  if (us.length || kr.length) S.community = { at: new Date().toISOString(), us: us.length ? us : S.community?.us || [], kr: kr.length ? kr : S.community?.kr || [] };
+  log(`  미국 ${us.length} · 한국 ${kr.length}`);
+}
+
+/* ── 13. 외국인·기관이 산 업종·종목 (수급분석 모니터링 사이트의 수집 자료 재사용) ── */
+log('▶ 종목 수급(stock-monitoring)');
+try {
+  const env = await get('https://raw.githubusercontent.com/Bongsuk-Yi/stock-monitoring/data/store.enc.json', { timeout: 90000 });
+  const X = JSON.parse(decryptNode(env, pw)), st = Object.values(X.stocks || {}).filter((x) => x.d?.length > 6 && x.frg && x.org);
+  const lastD = st.map((x) => x.d.at(-1)).sort().at(-1);
+  const rows = [];
+  for (const x of st) {
+    if (x.d.at(-1) !== lastD) continue; const n = x.d.length;
+    const amt = (arr, i) => (Number.isFinite(arr[i]) ? arr[i] * x.c[i] / 1e8 : 0), sum5 = (arr) => { let s = 0; for (let i = n - 5; i < n; i++) s += amt(arr, i); return s; };
+    if (!Number.isFinite(x.frg[n - 1]) && !Number.isFinite(x.org[n - 1])) continue;
+    rows.push({ code: x.code, name: x.name, sector: x.sector || '기타', pct: +((x.c[n - 1] / x.c[n - 2] - 1) * 100).toFixed(2), f1: Math.round(amt(x.frg, n - 1)), i1: Math.round(amt(x.org, n - 1)), f5: Math.round(sum5(x.frg)), i5: Math.round(sum5(x.org)) });
+  }
+  const by = {};
+  for (const r of rows) { const g = (by[r.sector] ??= { name: r.sector, n: 0, f1: 0, i1: 0, f5: 0, i5: 0, st: [] }); g.n++; g.f1 += r.f1; g.i1 += r.i1; g.f5 += r.f5; g.i5 += r.i5; g.st.push(r); }
+  const sectors = Object.values(by).map((g) => { g.st.sort((a, b) => Math.abs(b.f1 + b.i1) - Math.abs(a.f1 + a.i1)); const { st: list, ...rest } = g; return { ...rest, lead: list[0] && { name: list[0].name, code: list[0].code, v: list[0].f1 + list[0].i1 } }; });
+  const tot = (r) => r.f1 + r.i1;
+  if (rows.length > 50) S.smFlow = { at: X.updated, d: lastD, n: rows.length, sectors, buy: [...rows].sort((a, b) => tot(b) - tot(a)).slice(0, 25), sell: [...rows].sort((a, b) => tot(a) - tot(b)).slice(0, 25) };
+  log(`  종목 ${rows.length} · 업종 ${sectors.length} · 기준 ${lastD}`);
+} catch (e) { failures.push(`stock-monitoring 자료: ${e.message}`); log('  ✗', e.message); }
 
 S.updated = new Date().toISOString();
 S.failures = failures.slice(0, 60);

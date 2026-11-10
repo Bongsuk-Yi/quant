@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { sitePassword, encrypt, decryptNode, gatePage, LOCK_SNIPPET } from './gate.mjs';
-import { seriesSummary, flowSummary, krFearGreed, rating, temperature, anomalies, clusterNews, hotKeywords, calendar, cotSummary } from './analyze.mjs';
+import { seriesSummary, flowSummary, krFearGreed, rating, temperature, anomalies, clusterNews, hotKeywords, calendar, cotSummary, fredSummary } from './analyze.mjs';
 
 const root = new URL('..', import.meta.url).pathname, dist = join(root, 'dist');
 const pw = sitePassword(), STORE_KEY = 'quant.pw';
@@ -31,7 +31,7 @@ const D = {
   kr: S.kr || {}, industries: S.industries, themes: S.themes, usIndustries: S.usIndustries || [], movers: S.movers || {},
   events: clusterNews(S.news || [], 24).slice(0, 40), events3d: clusterNews(S.news || [], 72).slice(0, 120), keywords: hotKeywords(S.news || [], 24),
   news: (S.news || []).slice(0, 300).map(({ title, url, src, ts }) => ({ title, url, src, ts })),
-  calendar: calendar(S), cot: cotSummary(S), insider: S.insider, reports,
+  calendar: calendar(S), cot: cotSummary(S), fred: fredSummary(S), options: S.options || null, community: S.community || null, smFlow: S.smFlow || null, insider: S.insider, reports,
 };
 
 rmSync(dist, { recursive: true, force: true }); mkdirSync(dist, { recursive: true });

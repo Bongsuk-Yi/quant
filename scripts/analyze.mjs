@@ -208,3 +208,28 @@ export function cotSummary(S) {
     return { name: c.name, code: c.code, d: last?.d, net: last?.net, chg: last && prev ? last.net - prev.net : null, oi: last?.oi, idx: hi > lo ? round((last.net - lo) / (hi - lo) * 100, 0) : null, hist: net.map((x) => [x.d, x.net]) };
   });
 }
+
+/* ── FRED(미국 연준 경제 자료) 계열 ── [키, FRED id, 이름, 묶음, 종류, 단위]
+   종류: pct=값 그대로(%), yoy=지수의 전년 대비 %, diff=전기 대비 변화, lvl=값 그대로 */
+export const FRED = [
+  ['FFU', 'DFEDTARU', '연준 기준금리(상단)', 'policy', 'pct', '%'], ['DFF', 'DFF', '실효 연방기금금리', 'policy', 'pct', '%'], ['SOFR', 'SOFR', 'SOFR(담보부 익일물)', 'policy', 'pct', '%'],
+  ['SOFR30', 'SOFR30DAYAVG', 'SOFR 30일 평균', 'policy', 'pct', '%'], ['WALCL', 'WALCL', '연준 보유 자산', 'policy', 'lvl', '조달러', 1e-6],
+  ['DGS2', 'DGS2', '미국 2년 국채', 'bond', 'pct', '%'], ['DGS10', 'DGS10', '미국 10년 국채', 'bond', 'pct', '%'], ['T10Y2Y', 'T10Y2Y', '장단기 금리차(10년−2년)', 'bond', 'pct', '%p'],
+  ['IG', 'BAMLC0A0CM', '투자등급 회사채 가산금리', 'bond', 'pct', '%p'], ['HY', 'BAMLH0A0HYM2', '하이일드 회사채 가산금리', 'bond', 'pct', '%p'], ['MTG', 'MORTGAGE30US', '미국 30년 주택담보대출', 'bond', 'pct', '%'],
+  ['KR3M', 'IR3TIB01KRM156N', '한국 3개월 금리(월간·지연)', 'kr', 'pct', '%'], ['KR10Y', 'IRLTLT01KRM156N', '한국 10년 국채(월간·지연)', 'kr', 'pct', '%'],
+  ['CPI', 'CPIAUCSL', '미국 소비자물가(전년비)', 'macro', 'yoy', '%'], ['CORE', 'CPILFESL', '미국 근원 소비자물가(전년비)', 'macro', 'yoy', '%'], ['PCE', 'PCEPILFE', '미국 근원 PCE 물가(전년비)', 'macro', 'yoy', '%'],
+  ['UNRATE', 'UNRATE', '미국 실업률', 'macro', 'pct', '%'], ['NFP', 'PAYEMS', '미국 비농업 고용 증감', 'macro', 'diff', '천명'], ['ICSA', 'ICSA', '신규 실업수당 청구', 'macro', 'lvl', '천건', 1e-3],
+  ['GDP', 'A191RL1Q225SBEA', '미국 실질 GDP 성장률(분기, 연율)', 'macro', 'pct', '%'], ['UMCS', 'UMCSENT', '미시간대 소비자심리', 'macro', 'lvl', ''],
+];
+export function fredSummary(S) {
+  const out = [];
+  for (const [k, id, name, grp, kind, unit, mult = 1] of FRED) {
+    let s = S.fred?.[k]; if (!s || s.length < 3) continue;
+    if (kind === 'yoy') s = s.slice(12).map((x, i) => [x[0], (x[1] / s[i][1] - 1) * 100]);
+    else if (kind === 'diff') s = s.slice(1).map((x, i) => [x[0], x[1] - s[i][1]]);
+    else if (mult !== 1) s = s.map((x) => [x[0], x[1] * mult]);
+    const last = s.at(-1), prev = s.at(-2), yr = s.find((x) => x[0] >= `${+last[0].slice(0, 4) - 1}${last[0].slice(4)}`) || s[0];
+    out.push({ k, id, name, grp, unit, d: last[0], v: round(last[1], 2), prev: round(prev[1], 2), chg: round(last[1] - prev[1], 2), y1: round(last[1] - yr[1], 2), hist: s.slice(-260).map((x) => [x[0], round(x[1], 3)]) });
+  }
+  return out;
+}

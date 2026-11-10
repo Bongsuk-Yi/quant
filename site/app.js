@@ -153,9 +153,47 @@ function themeRow(g) {
   return `<div class="th"><span class="nm">${esc(g.name)}</span><span class="p n ${cls(g.pct)}">${sgn(g.pct)}</span><span class="ld">${ld}</span></div>`;
 }
 
+/* ── 추가 화면 조각: FRED 지표, 옵션 기대 변동폭, 커뮤니티 관심, 종목 수급 ── */
+const fredRows = (grp) => (D.fred || []).filter((x) => x.grp === grp);
+function fredTable(grp) {
+  const rows = fredRows(grp); if (!rows.length) return '<p class="note">자료를 아직 받지 못했습니다.</p>';
+  return `<div class="tw"><table class="tbl"><thead><tr><th>항목</th><th class="r">값</th><th class="r">직전 대비</th><th class="r">1년 전 대비</th><th>기준일</th></tr></thead><tbody>${rows.map((x) => `<tr data-fred="${x.k}" style="cursor:pointer"><td>${esc(x.name)}</td><td class="r">${fmt(x.v, 2)}${esc(x.unit)}</td><td class="r ${cls(x.chg)}">${x.chg > 0 ? '+' : ''}${fmt(x.chg, 2)}</td><td class="r ${cls(x.y1)}">${x.y1 > 0 ? '+' : ''}${fmt(x.y1, 2)}</td><td class="sm n">${esc(x.d)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function openFred(k) { const x = (D.fred || []).find((y) => y.k === k); if (x) modal(`${esc(x.name)} <small>FRED ${esc(x.id)} · ${x.d}</small>`, lineChart([{ name: x.name, color: '#3b5bdb', pts: x.hist }], { h: 240, yfmt: (v) => fmt(v, 2) })); }
+function optView() {
+  const o = D.options; if (!o?.list?.length) return '<section class="card"><h2>옵션 기대 변동폭</h2><p class="note">자료를 아직 받지 못했습니다.</p></section>';
+  const row = (x) => x.rows.map((r, i) => `<tr>${i === 0 ? `<td rowspan="${x.rows.length}"><a href="${usLink(x.sym)}" target="_blank" rel="noopener"><b>${esc(x.sym)}</b></a><div class="sm">${esc(x.name)}</div></td><td class="r" rowspan="${x.rows.length}">$${fmt(x.price, 2)}</td>` : ''}<td class="n sm">${md(r.exp)} <span class="muted">(${r.dte}일)</span></td><td class="r"><b>±${fmt(r.em, 1)}%</b></td><td class="r sm">$${fmt(x.price * (1 - r.em / 100), 1)} ~ $${fmt(x.price * (1 + r.em / 100), 1)}</td><td class="r">${r.iv ?? '-'}${r.iv ? '%' : ''}</td>${i === 0 ? `<td class="r" rowspan="${x.rows.length}">${x.pcrVol ?? '-'}</td><td class="r" rowspan="${x.rows.length}">${x.pcrOI ?? '-'}</td>` : ''}</tr>`).join('');
+  return `<section class="card"><h2>옵션 기대 변동폭 (Expected Move)</h2><p class="sub">만기별 등가격 콜+풋 가격 ÷ 주가 = 옵션 시장이 그 만기까지 예상하는 움직임 폭 · CBOE 지연 시세 · ${kstTime(o.at)}</p>
+    <div class="tw"><table class="tbl"><thead><tr><th>종목</th><th class="r">주가</th><th>만기</th><th class="r">기대 변동폭</th><th class="r">예상 범위</th><th class="r">내재변동성</th><th class="r">풋/콜 거래량</th><th class="r">풋/콜 미결제</th></tr></thead><tbody>${o.list.map(row).join('')}</tbody></table></div>
+    <p class="note">풋/콜 비율이 1보다 크면 풋(하락 대비) 쪽이 더 많다는 뜻입니다. 실적 발표가 만기 전에 있으면 기대 변동폭이 커집니다.</p></section>`;
+}
+function commView() {
+  const c = D.community || {}, us = c.us || [], kr = c.kr || [];
+  const usT = us.length ? `<div class="tw"><table class="tbl"><thead><tr><th>순위</th><th>종목</th><th class="r">언급 수</th><th class="r">24시간 전</th><th class="r">변화</th><th class="r">순위 변화</th></tr></thead><tbody>${us.map((r) => { const ch = r.m0 ? (r.m / r.m0 - 1) * 100 : null, rk = r.rank0 ? r.rank0 - r.rank : null; return `<tr><td class="n">${r.rank}</td><td><a href="${usLink(r.sym)}" target="_blank" rel="noopener"><b>${esc(r.sym)}</b></a> <span class="sm">${esc(r.name)}</span></td><td class="r">${fmt(r.m)}</td><td class="r sm">${fmt(r.m0)}</td><td class="r ${cls(ch)}">${ch == null ? '-' : sgn(ch, 0)}</td><td class="r ${cls(rk)}">${rk == null ? '신규' : rk > 0 ? '▲' + rk : rk < 0 ? '▼' + -rk : '-'}</td></tr>`; }).join('')}</tbody></table></div>` : '<p class="note">자료 없음</p>';
+  const krT = kr.length ? `<div class="tw"><table class="tbl"><thead><tr><th>순위</th><th>종목</th><th class="r">가격</th><th class="r">등락</th></tr></thead><tbody>${kr.map((r, i) => `<tr><td class="n">${i + 1}</td><td><a href="${krLink(r.code)}" target="_blank" rel="noopener"><b>${esc(r.name)}</b></a> <span class="sm">${esc(r.code)} · ${esc(r.mk)}</span></td><td class="r">${fmt(r.price)}</td><td class="r ${cls(r.pct)}">${sgn(r.pct)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="note">한국 검색 상위 자료는 받지 못했습니다. 대신 뉴스 탭의 화제 키워드를 참고하세요.</p>';
+  return `<section class="card c6"><h2>미국 커뮤니티 관심</h2><p class="sub">Reddit 투자 게시판 언급 수 (ApeWisdom 집계) · ${c.at ? kstTime(c.at) : ''}</p>${usT}</section>
+    <section class="card c6"><h2>한국 검색 상위 종목</h2><p class="sub">네이버 증권 검색 상위</p>${krT}
+    <h3>화제 키워드</h3><div class="chips">${D.keywords.slice(0, 24).map((k) => `<button class="chip" data-kw="${esc(k.w)}" data-go="news">${esc(k.w)}<b>${k.c}</b></button>`).join('')}</div></section>`;
+}
+function smSectorRows(key, n, dir) {
+  const f = D.smFlow; if (!f) return '';
+  const val = (g) => (key === '1' ? g.f1 + g.i1 : g.f5 + g.i5);
+  return [...f.sectors].sort((a, b) => dir * (val(b) - val(a))).slice(0, n).map((g) => `<div class="th"><span class="nm">${esc(g.name)} <span class="sm">${g.n}</span></span><span class="p n ${cls(val(g))}">${eok(val(g))}</span><span class="ld">외국인 ${eok(key === '1' ? g.f1 : g.f5)} · 기관 ${eok(key === '1' ? g.i1 : g.i5)}${g.lead ? ` · ${esc(g.lead.name)} ${eok(g.lead.v)}` : ''}</span></div>`).join('');
+}
+function smFlowCards() {
+  const f = D.smFlow; if (!f) return `<section class="card"><h2>외국인·기관이 산 업종</h2><p class="note">수급분석 모니터링 사이트의 자료를 아직 받지 못했습니다.</p></section>`;
+  const t = (rows) => `<div class="tw"><table class="tbl"><thead><tr><th>종목</th><th class="r">등락</th><th class="r">외국인</th><th class="r">기관</th><th class="r">합계</th></tr></thead><tbody>${rows.map((r) => `<tr><td><a href="${krLink(r.code)}" target="_blank" rel="noopener"><b>${esc(r.name)}</b></a> <span class="sm">${esc(r.sector)}</span></td><td class="r ${cls(r.pct)}">${sgn(r.pct)}</td><td class="r ${cls(r.f1)}">${fmt(r.f1)}</td><td class="r ${cls(r.i1)}">${fmt(r.i1)}</td><td class="r ${cls(r.f1 + r.i1)}"><b>${fmt(r.f1 + r.i1)}</b></td></tr>`).join('')}</tbody></table></div>`;
+  const k = state.smKey;
+  return `<section class="card"><h2>외국인·기관이 산 업종 <span class="seg" id="smk"><button data-k="1" class="${k === '1' ? 'on' : ''}">1일</button><button data-k="5" class="${k === '5' ? 'on' : ''}">5일</button></span></h2>
+    <p class="sub">시가총액 상위 ${f.n}종목의 외국인+기관 순매수 금액을 업종별로 합산 · 기준 ${md(ymdDash(f.d))} · 수급분석 모니터링 사이트 자료</p>
+    <div class="thm"><div><h3 style="margin-top:0">산 업종</h3>${smSectorRows(k, 10, 1)}</div><div><h3 style="margin-top:0">판 업종</h3>${smSectorRows(k, 10, -1)}</div></div></section>
+    <section class="card c6"><h2>외국인·기관 순매수 상위 종목</h2><p class="sub">${md(ymdDash(f.d))} · 억원(추정: 순매수 수량 × 종가)</p>${t(f.buy.slice(0, 15))}</section>
+    <section class="card c6"><h2>외국인·기관 순매도 상위 종목</h2><p class="sub">같은 기준</p>${t(f.sell.slice(0, 15))}</section>`;
+}
+
 /* ── 화면 ── */
 const VIEW = {};
-const state = { tab: 'home', tileGrp: lsGet('q.tile', 'kr'), mvRegion: 'kr', thRegion: 'kr', mkt: 'fg', rscope: 'all', mcat: '', newsSrc: '', kw: '', report: 0, calKind: '' };
+const state = { tab: 'home', tileGrp: lsGet('q.tile', 'kr'), mvRegion: 'kr', thRegion: 'kr', mkt: 'fg', rscope: 'all', mcat: '', smKey: '1', newsSrc: '', kw: '', report: 0, calKind: '' };
 
 VIEW.home = () => {
   const now = kstNow(), mm = now.getUTCMonth() + 1, dd = now.getUTCDate();
@@ -188,6 +226,7 @@ VIEW.home = () => {
   <section class="card c6"><h2>오늘 많이 오른·내린 ${state.thRegion === 'kr' ? '테마' : '업종'} <span class="seg" id="thr"><button data-r="kr" class="${state.thRegion === 'kr' ? 'on' : ''}">한국</button><button data-r="us" class="${state.thRegion === 'us' ? 'on' : ''}">미국</button></span><button class="more" data-go="market" data-sub="sector">업종 전체 ›</button></h2>
     <p class="sub">${state.thRegion === 'kr' ? '하루 등락 · 작은 글씨는 그날 가장 크게 움직인 대표 종목' : '미국 시가총액 상위 600종목을 업종별로 묶은 평균 등락'}</p>
     <div class="thm"><div>${thSorted.slice(0, 6).map(themeRow).join('')}</div><div>${thSorted.slice(-6).reverse().map(themeRow).join('')}</div></div></section>
+  ${D.smFlow ? `<section class="card"><h2>외국인·기관이 산 업종 <button class="more" data-go="flow">업종 자금 흐름 ›</button></h2><p class="sub">시가총액 상위 ${D.smFlow.n}종목 기준 · ${md(ymdDash(D.smFlow.d))} · 외국인+기관 순매수 금액</p><div class="thm"><div>${smSectorRows('1', 5, 1)}</div><div>${smSectorRows('1', 5, -1)}</div></div></section>` : ''}
   <section class="card c6"><h2>움직인 종목 <span class="seg" id="mvr"><button data-r="kr" class="${state.mvRegion === 'kr' ? 'on' : ''}">한국</button><button data-r="us" class="${state.mvRegion === 'us' ? 'on' : ''}">미국</button></span><button class="more" data-go="market" data-sub="movers">더 보기 ›</button></h2>
     <p class="sub">${state.mvRegion === 'kr' ? 'KRX 보통주 · 1,000원·거래대금 10억원 이상' : '나스닥·뉴욕 시가총액 상위 각 300종목'}</p>
     <div class="thm"><div>${(mv?.up || []).slice(0, 5).map((r) => moverRow(r, state.mvRegion === 'us')).join('')}</div><div>${(mv?.down || []).slice(0, 5).map((r) => moverRow(r, state.mvRegion === 'us')).join('')}</div></div></section>
@@ -225,7 +264,7 @@ VIEW.news = () => {
 VIEW.market = () => {
   $('#title').textContent = '시장';
   const sub = state.mkt;
-  const segs = [['fg', '시장 체온·공포탐욕'], ['sector', '업종·테마'], ['movers', '급등·급락']];
+  const segs = [['fg', '시장 체온·공포탐욕'], ['sector', '업종·테마'], ['movers', '급등·급락'], ['comm', '커뮤니티 관심'], ['opt', '옵션 기대 변동폭']];
   let body = '';
   if (sub === 'fg') {
     const k = D.krfg, c = D.cnn;
@@ -247,6 +286,8 @@ VIEW.market = () => {
     <section class="card c6"><h2>한국 업종</h2><p class="sub">네이버 증권 업종 분류</p>${tbl(ind, '업종')}</section>
     <section class="card c6"><h2>미국 섹터 ETF</h2><p class="sub">SPDR 섹터 ETF · 하루 / 1주 / 1달</p><div class="tw"><table class="tbl"><thead><tr><th>섹터</th><th class="r">1일</th><th class="r">1주</th><th class="r">1달</th></tr></thead><tbody>${etf.map((s) => `<tr><td>${esc(s.name)}</td><td class="r ${cls(s.pct)}">${sgn(s.pct)}</td><td class="r ${cls(s.w1)}">${sgn(s.w1, 1)}</td><td class="r ${cls(s.m1)}">${sgn(s.m1, 1)}</td></tr>`).join('')}</tbody></table></div></section>
     <section class="card c6"><h2>미국 업종</h2><p class="sub">시가총액 상위 600종목을 업종별로 묶은 평균 등락</p><div class="tw"><table class="tbl"><thead><tr><th>업종</th><th class="r">평균 등락</th><th>가장 크게 움직인 종목</th></tr></thead><tbody>${usi.map((g) => `<tr><td>${esc(g.name)} <span class="sm">${g.n}</span></td><td class="r ${cls(g.pct)}">${sgn(g.pct)}</td><td class="sm"><a href="${usLink(g.lead.code)}" target="_blank" rel="noopener">${esc(g.lead.name)}</a> <span class="${cls(g.lead.pct)}">${sgn(g.lead.pct, 1)}</span></td></tr>`).join('')}</tbody></table></div></section>`;
+  } else if (sub === 'comm') { body = commView();
+  } else if (sub === 'opt') { body = optView();
   } else {
     const t = (rows, us) => `<div class="tw"><table class="tbl"><thead><tr><th>종목</th><th class="r">가격</th><th class="r">등락</th><th class="r">${us ? '시가총액' : '거래대금'}</th></tr></thead><tbody>${rows.map((r) => `<tr><td><a href="${us ? usLink(r.code) : krLink(r.code)}" target="_blank" rel="noopener"><b>${esc(r.name)}</b></a> <span class="sm">${esc(r.code)} · ${esc(us ? r.ex : r.mk)}</span>${r.limit ? '<span class="pill lim">가격제한</span>' : ''}</td><td class="r">${us ? '$' + fmt(r.price, 2) : fmt(r.price)}</td><td class="r ${cls(r.pct)}">${sgn(r.pct)}</td><td class="r">${us ? (r.cap ? '$' + fmt(r.cap / 1e9, 0) + 'B' : '-') : fmt(r.val / 100) + '억'}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">자료 없음</td></tr>'}</tbody></table></div>`;
     const k = D.movers.kr || {}, u = D.movers.us || {};
@@ -277,7 +318,7 @@ VIEW.flow = () => {
   const cot = D.cot.map((c) => `<tr data-cot="${c.code}" style="cursor:pointer"><td><b>${esc(c.name)}</b> <span class="sm">${md(c.d)}</span></td><td class="r ${cls(c.net)}">${fmt(c.net)}</td><td class="r ${cls(c.chg)}">${c.chg == null ? '-' : (c.chg > 0 ? '+' : '') + fmt(c.chg)}</td><td class="r">${c.idx ?? '-'}</td></tr>`).join('');
   const ins = (D.insider?.rows || []).slice(0, 40).map((r) => `<tr><td class="n sm">${esc(r.trade)}</td><td><a href="${usLink(r.sym)}" target="_blank" rel="noopener"><b>${esc(r.sym)}</b></a> <span class="sm">${esc(r.co)}</span></td><td class="sm">${esc(r.title)}</td><td class="r">$${fmt(r.price, 2)}</td><td class="r up">$${fmt((r.value || 0) / 1e3, 0)}K</td><td class="r sm">${esc(r.chg)}</td></tr>`).join('');
   const br = D.breadth.map(([d, v]) => [ymdDash(d), Math.round((v.up / Math.max(1, v.up + v.down)) * 1000) / 10]);
-  return `${mk('KOSPI', '코스피')}${mk('KOSDAQ', '코스닥')}
+  return `${mk('KOSPI', '코스피')}${mk('KOSDAQ', '코스닥')}${smFlowCards()}
   <section class="card c6"><h2>미국 선물 포지션 (CFTC)</h2><p class="sub">투기 세력(비상업) 순매수 계약 수 · 매주 금요일 발표(화요일 기준) · 위치 = 최근 3년 범위 안 0~100 · 줄을 누르면 차트</p>
     <div class="tw"><table class="tbl"><thead><tr><th>계약</th><th class="r">순포지션</th><th class="r">전주 대비</th><th class="r">위치</th></tr></thead><tbody>${cot || '<tr><td colspan="4" class="empty">자료 없음</td></tr>'}</tbody></table></div></section>
   <section class="card c6"><h2>오른 종목 비율</h2><p class="sub">코스피+코스닥 · 수집 시작 뒤부터 쌓임</p>${lineChart([{ name: '오른 종목 %', color: '#d6336c', pts: br }], { h: 170, band: [0, 100] })}</section>
@@ -299,7 +340,10 @@ VIEW.macro = () => {
   <section class="card c6"><h2>환율</h2><p class="sub">Yahoo · 원/100엔은 100엔 기준</p>${tbl(['USDKRW', 'JPYKRW', 'EURKRW', 'CNYKRW', 'DXY', 'USDJPY'])}<h3>원/달러 최근 1년</h3>${S.USDKRW ? lineChart([{ name: '원/달러', color: '#3b5bdb', pts: S.USDKRW.hist }], { h: 170, yfmt: (v) => fmt(v) }) : ''}</section>
   <section class="card c6"><h2>원자재·위험 지표</h2>${tbl(['WTI', 'BRENT', 'GOLD', 'SILVER', 'COPPER', 'NATGAS', 'VIX', 'MOVE', 'HYG', 'BTC'])}</section>
   <section class="card c6"><h2>주요 경제 발표</h2><p class="sub">최근 이틀 ~ 다음 주 · 발표값·예상·이전 (Nasdaq 경제 일정)</p>${calRows(econ, { minImp: 2 })}</section>
-  <section class="card"><p class="note" style="margin:0">한국 기준금리·국고채 금리와 신용융자(빚투) 잔고는 무료로 자동 수집할 수 있는 출처가 막혀 있어 넣지 못했습니다.</p></section>`;
+  <section class="card c6"><h2>기준금리·SOFR 단기금리</h2><p class="sub">미국 연준 경제 자료(FRED) · 줄을 누르면 차트</p>${fredTable('policy')}<h3>한국 금리</h3>${fredTable('kr')}</section>
+  <section class="card c6"><h2>국채·회사채</h2><p class="sub">가산금리 = 같은 만기 국채 대비 더 얹어 주는 금리. 커질수록 신용 불안</p>${fredTable('bond')}</section>
+  <section class="card"><h2>FOMC 거시 지표</h2><p class="sub">연준이 금리를 정할 때 보는 물가·고용·성장 지표 · 최신 발표값</p>${fredTable('macro')}</section>
+  <section class="card"><p class="note" style="margin:0">한국 금리는 OECD 월간 자료라 한두 달 늦습니다. 한국 기준금리·국고채 일별 금리, 신용융자 잔고, 공매도는 무료 인증키(한국은행 ECOS, KRX)가 있어야 받을 수 있습니다.</p></section>`;
 };
 
 /* ── AI 일일 리포트 (v2: 전체/글로벌/한국, 핵심 3줄, 볼 것, 근거 번호) ── */
@@ -340,7 +384,7 @@ VIEW.ai = () => {
   const secs = [...(sc !== 'kr' ? SEC_G : []), ...(sc !== 'g' ? SEC_K : [])];
   const cat = state.mcat, ms = p.metrics.filter((m) => !cat || mcatOf(m.grp) === cat);
   const cnt = (c) => p.metrics.filter((m) => !c || mcatOf(m.grp) === c).length;
-  const used = new Set([...p.key3, ...p.watch, ...Object.values(p.sections).flat()].flatMap((x) => x.refs));
+  const used = new Set([...p.key3, ...p.watch, ...Object.values(p.sections).flat(), ...(p.signals?.good || []), ...(p.signals?.bad || [])].flatMap((x) => x.refs));
   const newsAll = [...p.news, ...(p.web || [])];
   return `
   <section class="card"><h2>일일 리포트 - ${dl}</h2><p class="sub">${kstTime(p.created)} 작성 · 문장 옆 번호를 누르면 근거로 쓴 기사·지표로 이동</p>
@@ -349,6 +393,7 @@ VIEW.ai = () => {
     <h3>오늘의 핵심 3줄</h3>${repItems(p.key3)}
     <h3>오늘·이번 주 볼 것</h3>${repItems(p.watch)}
     ${secs.map(([k, n]) => `<h3>${n}</h3>${repItems(p.sections[k])}`).join('')}
+    ${p.signals && (p.signals.good.length || p.signals.bad.length) ? `<h3>AI가 찾은 호재·악재</h3><div class="thm"><div><b class="up">호재</b>${repItems(p.signals.good)}</div><div><b class="down">악재</b>${repItems(p.signals.bad)}</div></div>` : ''}
     ${p.summary ? `<h3>정리</h3><p>${esc(p.summary)}</p>` : ''}
     <p class="note">Claude가 자동 작성한 참고 자료이며 투자 권유가 아닙니다. 숫자는 근거 지표·원문 기사에서 확인하세요.</p></section>
   <section class="card"><h2>시장 심리</h2><p class="sub">${r.id} 리포트 작성 시점 기준</p>${mood(p)}
@@ -384,7 +429,7 @@ function render() {
 function go(t, sub) { state.tab = t; if (sub) state.mkt = sub; history.replaceState(null, '', '#' + t + (sub ? '/' + sub : '')); render(); }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-t]'); if (b && b.closest('nav')) return go(b.dataset.t);
-  const g = e.target.closest('[data-go]'); if (g) return go(g.dataset.go, g.dataset.sub);
+  const g = e.target.closest('[data-go]'); if (g) { if (g.dataset.kw) state.kw = g.dataset.kw; return go(g.dataset.go, g.dataset.sub); }
   const g2 = e.target.closest('[data-go2]'); if (g2) return go(g2.dataset.go2);
   const tl = e.target.closest('.tile[data-k], tr[data-k]'); if (tl) return openSeries(tl.dataset.k);
   const tg = e.target.closest('#tg button'); if (tg) { state.tileGrp = tg.dataset.g; lsSet('q.tile', state.tileGrp); return render(); }
@@ -396,6 +441,8 @@ document.addEventListener('click', (e) => {
   const rn = e.target.closest('[data-rnav]'); if (rn) { const k = +rn.dataset.rnav; state.report = k === 0 ? 0 : Math.max(0, Math.min(D.reports.length - 1, state.report + k)); return render(); }
   const rs = e.target.closest('#rsc button'); if (rs) { state.rscope = rs.dataset.s; const y = window.scrollY; render(); return window.scrollTo(0, y); }
   const mc = e.target.closest('#mcat button'); if (mc) { state.mcat = mc.dataset.c; const y = window.scrollY; render(); return window.scrollTo(0, y); }
+  const fr = e.target.closest('tr[data-fred]'); if (fr) return openFred(fr.dataset.fred);
+  const sk = e.target.closest('#smk button'); if (sk) { state.smKey = sk.dataset.k; const y = window.scrollY; render(); return window.scrollTo(0, y); }
   const ck = e.target.closest('#ck button'); if (ck) { state.calKind = ck.dataset.c; return render(); }
   const ct = e.target.closest('tr[data-cot]'); if (ct) { const c = D.cot.find((x) => x.code === ct.dataset.cot); if (c) modal(esc(c.name) + ' <small>투기 세력 순포지션</small>', lineChart([{ name: '순포지션', color: '#3b5bdb', pts: c.hist }], { h: 240, zero: true, yfmt: (v) => fmt(v / 1000, 0) + 'K' })); }
 });

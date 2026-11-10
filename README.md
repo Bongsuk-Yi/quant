@@ -13,6 +13,13 @@
 | AI 브리핑 | 평일 06:47 Claude가 위 자료로 쓰는 아침 브리핑 | Claude Code(구독 토큰) |
 | 일정 | 경제 지표, 대형주 실적, 한·미 옵션 만기 | Nasdaq, 자체 계산 |
 
+## 추가 자료 (2차)
+- 기준금리·SOFR·국채·회사채 가산금리·FOMC 거시 지표: FRED(미국 연준 경제 자료, 키 없이 CSV)
+- 옵션 기대 변동폭: CBOE 지연 시세(등가격 콜+풋 ÷ 주가)
+- 커뮤니티 관심: ApeWisdom(Reddit 언급 집계), 네이버 증권 검색 상위
+- 외국인·기관이 산 업종·종목: `stock-monitoring` 저장소 `data` 브랜치의 종목별 수급 자료를 같은 비밀번호로 풀어 재사용
+- AI가 찾은 호재·악재: AI 리포트에 포함
+
 ## 구성
 - `scripts/collect.mjs` 수집 → `store.enc.json`(암호화, `data` 브랜치에 누적)
 - `scripts/analyze.mjs` 계산 규칙(요약·평소 대비 z, 한국 공포탐욕, 뉴스 묶기, 일정)

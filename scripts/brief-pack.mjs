@@ -14,7 +14,7 @@ const web = (Array.isArray(r.web) ? r.web : []).filter((w) => /^W\d+$/.test(w.id
 for (const w of web) known.add(w.id);
 const clean = (a) => a.map((x) => ({ ...x, refs: x.refs.filter((id) => known.has(id)) }));
 const out = { v: 2, date: r.date, created: new Date().toISOString(), oneLine: String(r.oneLine).trim(), key3: clean(items(r.key3, 'key3', 3)).slice(0, 3), watch: clean(items(r.watch, 'watch', 2)),
-  sections: Object.fromEntries(SEC.map((k) => [k, clean(items(r.sections?.[k], k, 1))])), summary: String(r.summary || '').trim(), metrics: refs.metrics, news: refs.news, web };
+  sections: Object.fromEntries(SEC.map((k) => [k, clean(items(r.sections?.[k], k, 1))])), signals: { good: clean(items(r.signals?.good || [], 'good', 0)), bad: clean(items(r.signals?.bad || [], 'bad', 0)) }, summary: String(r.summary || '').trim(), metrics: refs.metrics, news: refs.news, web };
 const chars = JSON.stringify([out.oneLine, out.key3, out.watch, out.sections, out.summary]).length;
 if (chars < 1500) fail(`내용이 너무 짧음 (${chars})`);
 writeFileSync(dest, JSON.stringify(encrypt(JSON.stringify(out), sitePassword())));
