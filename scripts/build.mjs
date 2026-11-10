@@ -15,8 +15,13 @@ const cnn = S.cnn ? { score: Math.round(S.cnn.now.score), rating: rating(S.cnn.n
 // AI 브리핑 (reports 브랜치 → reports/r/*.md.enc.json)
 const reports = [];
 const rdir = join(root, 'reports', 'r');
-if (existsSync(rdir)) for (const f of readdirSync(rdir).filter((f) => f.endsWith('.md.enc.json')).sort().reverse().slice(0, 40)) {
-  try { reports.push({ id: f.replace('.md.enc.json', ''), md: decryptNode(JSON.parse(readFileSync(join(rdir, f), 'utf8')), pw) }); } catch (e) { console.warn('리포트 열기 실패', f, e.message); }
+if (existsSync(rdir)) {
+  const byId = new Map();
+  for (const f of readdirSync(rdir).filter((f) => f.endsWith('.enc.json')).sort()) {
+    const id = f.slice(0, 10), isJson = f.endsWith('.json.enc.json') && !f.endsWith('.md.enc.json');
+    try { const t = decryptNode(JSON.parse(readFileSync(join(rdir, f), 'utf8')), pw); if (isJson) byId.set(id, { id, rep: JSON.parse(t) }); else if (!byId.get(id)?.rep) byId.set(id, { id, md: t }); } catch (e) { console.warn('리포트 열기 실패', f, e.message); }
+  }
+  reports.push(...[...byId.values()].sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 30));
 }
 
 const D = {

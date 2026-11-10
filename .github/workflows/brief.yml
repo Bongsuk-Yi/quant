@@ -50,17 +50,15 @@ jobs:
           node -e '
             const fs=require("fs"); const r=JSON.parse(fs.readFileSync("claude.json","utf8"));
             if (r.is_error) { console.log("::error::", String(r.result).slice(0,1500)); process.exit(1); }
-            const md=fs.existsSync("out/report.md")?fs.readFileSync("out/report.md","utf8"):"";
-            if (md.length<800) { console.log("::error::브리핑이 없거나 너무 짧습니다", md.length, String(r.result).slice(0,800)); process.exit(1); }
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${md.length.toLocaleString()}자 · 턴 ${r.num_turns} · 모델 ${Object.keys(r.modelUsage||{}).join(",")}\n`);'
+            if (!fs.existsSync("out/report.json")) { console.log("::error::리포트 파일이 없습니다", String(r.result).slice(0,800)); process.exit(1); }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- 턴 ${r.num_turns} · 모델 ${Object.keys(r.modelUsage||{}).join(",")}\n`);'
 
       - name: 암호화해서 reports 브랜치에 저장
         run: |
           id=$(TZ=Asia/Seoul date +%F)
           git fetch origin reports --depth=1 && git worktree add rep origin/reports || { git worktree add --detach rep && (cd rep && git checkout -q --orphan reports-new && git rm -rfq . 2>/dev/null || true); }
           mkdir -p rep/r
-          node -e '
-            import("./scripts/gate.mjs").then(g=>{const fs=require("fs"); fs.writeFileSync(process.argv[1], JSON.stringify(g.encrypt(fs.readFileSync("work/out/report.md"), g.sitePassword())));});' "rep/r/$id.md.enc.json"
+          node scripts/brief-pack.mjs work "rep/r/$id.json.enc.json"
           cd rep
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"

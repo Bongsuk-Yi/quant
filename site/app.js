@@ -155,7 +155,7 @@ function themeRow(g) {
 
 /* ── 화면 ── */
 const VIEW = {};
-const state = { tab: 'home', tileGrp: lsGet('q.tile', 'kr'), mvRegion: 'kr', thRegion: 'kr', mkt: 'fg', newsSrc: '', kw: '', report: 0, calKind: '' };
+const state = { tab: 'home', tileGrp: lsGet('q.tile', 'kr'), mvRegion: 'kr', thRegion: 'kr', mkt: 'fg', rscope: 'all', mcat: '', newsSrc: '', kw: '', report: 0, calKind: '' };
 
 VIEW.home = () => {
   const now = kstNow(), mm = now.getUTCMonth() + 1, dd = now.getUTCDate();
@@ -178,7 +178,7 @@ VIEW.home = () => {
   <section class="card c6"><h2>지난 장 마감</h2><p class="sub">한국 ${k?.at ? kstTime(k.at) : '-'} · 미국 ${S.SPX ? md(S.SPX.d) : '-'}</p>
     <h3 style="margin-top:0">한국</h3><div class="idx">${krClose}</div><h3>미국</h3><div class="idx">${usClose}</div></section>
   <section class="card c6"><h2>AI 아침 브리핑 ${rep ? `<button class="more" data-go="ai">전체 리포트 ›</button>` : ''}</h2><p class="sub">Claude가 이 사이트의 시장 자료와 뉴스로 쓴 요약입니다</p>
-    ${rep ? `<div class="md fade">${mdRender(rep.md)}</div>` : '<p class="note">아직 브리핑이 없습니다. 평일 아침 6시 50분쯤 자동으로 만들어집니다.</p>'}</section>
+    ${rep ? repCard(rep) : '<p class="note">아직 브리핑이 없습니다. 평일 아침 6시 50분쯤 자동으로 만들어집니다.</p>'}</section>
   <section class="card c6"><h2>평소와 크게 다른 것</h2><p class="sub">최근 거래일 하루 변화가 지난 60일 평소 변동의 2배를 넘은 것 · 지수·금리·환율·원자재·수급</p>${an}</section>
   <section class="card c6"><h2>시장 기분 <button class="more" data-go="market" data-sub="fg">자세히 ›</button></h2><p class="sub">0에 가까울수록 공포, 100에 가까울수록 탐욕</p>
     <div class="gauges">${gauge(cnn?.score, '미국 · CNN 공포탐욕', cnn ? `1주 전 ${Math.round(cnn.w1)} · 1달 전 ${Math.round(cnn.m1)}` : '')}${gauge(krfg?.score, '한국 · 자체 계산', krfg ? `1주 전 ${krfg.w1 ?? '-'} · 1달 전 ${krfg.m1 ?? '-'}` : '')}</div>
@@ -302,12 +302,68 @@ VIEW.macro = () => {
   <section class="card"><p class="note" style="margin:0">한국 기준금리·국고채 금리와 신용융자(빚투) 잔고는 무료로 자동 수집할 수 있는 출처가 막혀 있어 넣지 못했습니다.</p></section>`;
 };
 
+/* ── AI 일일 리포트 (v2: 전체/글로벌/한국, 핵심 3줄, 볼 것, 근거 번호) ── */
+const SEC_G = [['g_market', '글로벌 경제·금융 시장'], ['g_trend', '글로벌 사회 관심사·트렌드'], ['g_insight', '글로벌 투자자·비즈니스 시사점']];
+const SEC_K = [['k_market', '한국 경제·금융 시장'], ['k_trend', '한국 사회 관심사·트렌드'], ['k_insight', '한국 투자자·비즈니스 시사점']];
+const MCAT = [['', '전체'], ['idx', '주가 지수'], ['fx', '환율'], ['cmd', '원자재'], ['rate', '채권 수익률'], ['risk', '위험·암호화폐'], ['sector', '미국 섹터 ETF'], ['flow', '수급'], ['fg', '심리']];
+const mcatOf = (g) => (['kr', 'us', 'asia', 'fut'].includes(g) ? 'idx' : g);
+function refChips(refs) {
+  return (refs || []).map((id) => `<button class="ref ${id[0] === 'M' ? 'm' : 'nw'}" data-ref="${esc(id)}">${id[0] === 'M' ? '지표' : '뉴스'} ${esc(id)}</button>`).join('');
+}
+const repItems = (arr) => `<ul class="rep">${(arr || []).map((x) => `<li>${esc(x.text)} ${refChips(x.refs)}</li>`).join('')}</ul>`;
+function mood(rep) {
+  const M = Object.fromEntries(rep.metrics.map((m) => [m.k, m]));
+  const card = (title, sub, label, tone) => `<div class="mood ${tone}"><div class="nm">${title}</div><div class="lb">${label}</div><div class="sm">${sub}</div></div>`;
+  const out = [];
+  const vix = M.VIX ? parseFloat(M.VIX.val.replace(/,/g, '')) : null, fg = M.CNNFG ? +M.CNNFG.val : null, kfg = M.KRFG ? +M.KRFG.val : null;
+  if (vix != null || fg != null) { const sc = fg ?? (vix >= 30 ? 15 : vix >= 20 ? 40 : 60); out.push(card('투자 심리', `VIX ${M.VIX?.val ?? '-'} · CNN ${fg ?? '-'} · 한국 ${kfg ?? '-'}`, sc < 25 ? '극단적 공포' : sc < 45 ? '공포' : sc <= 55 ? '중립' : sc <= 75 ? '탐욕' : '극단적 탐욕', sc < 45 ? 'cold' : sc > 55 ? 'hot' : '')); }
+  const by = (m, hi, lo, a, b, c) => (m.n >= hi ? [a, 'hot'] : m.n <= lo ? [c, 'cold'] : [b, '']);
+  if (M.DXY) { const [l, t] = by(M.DXY, 0.3, -0.3, '달러 강세', '보합', '달러 약세'); out.push(card('달러 강세도', `달러인덱스 ${M.DXY.val} (${M.DXY.chg})`, l, t)); }
+  if (M.GOLD) { const [l, t] = by(M.GOLD, 0.5, -0.5, '원자재 상승', '보합', '원자재 하락'); out.push(card('원자재 흐름', `금 ${M.GOLD.val} (${M.GOLD.chg})${M.WTI ? ` · WTI ${M.WTI.chg}` : ''}`, l, t)); }
+  if (M.BTC) { const [l, t] = by(M.BTC, 2, -2, '위험 선호', '중립', '위험 회피'); out.push(card('암호화폐 심리', `비트코인 ${M.BTC.val} (${M.BTC.chg})`, l, t)); }
+  if (M.US10Y) { const bp = M.US10Y.n * 100; out.push(card('채권 시장', `미국 10년 ${M.US10Y.val} (${M.US10Y.chg})`, bp >= 5 ? '금리 상승' : bp <= -5 ? '금리 하락' : '안정', bp >= 5 ? 'hot' : bp <= -5 ? 'cold' : '')); }
+  return `<div class="moods">${out.join('')}</div>`;
+}
+function repCard(r) {   // 홈 요약
+  if (!r.rep) return `<div class="md fade">${mdRender(r.md)}</div>`;
+  const p = r.rep;
+  return `<blockquote class="one">${esc(p.oneLine)}</blockquote><h3>오늘의 핵심 3줄</h3>${repItems(p.key3)}<h3>오늘·이번 주 볼 것</h3>${repItems(p.watch.slice(0, 3))}`;
+}
 VIEW.ai = () => {
-  $('#title').textContent = 'AI 브리핑';
-  if (!D.reports.length) return `<section class="card"><h2>AI 아침 브리핑</h2><p class="note">아직 브리핑이 없습니다. 평일 아침 6시 50분쯤 GitHub Actions에서 Claude가 이 사이트의 자료와 뉴스로 작성합니다. 바로 만들려면 저장소 Actions → <b>AI 브리핑</b> → Run workflow를 누르세요.</p></section>`;
-  const r = D.reports[state.report] || D.reports[0];
-  return `<section class="card"><div class="rlist">${D.reports.slice(0, 20).map((x, i) => `<button class="chip ${i === state.report ? 'on' : ''}" data-rep="${i}">${esc(x.id)}</button>`).join('')}</div><div class="md">${mdRender(r.md)}</div></section>`;
+  $('#title').textContent = 'AI 시장 리포트';
+  if (!D.reports.length) return `<section class="card"><h2>AI 시장 리포트</h2><p class="note">아직 리포트가 없습니다. 평일 아침 6시 50분쯤 GitHub Actions에서 Claude가 이 사이트의 자료와 뉴스로 작성합니다. 바로 만들려면 저장소 Actions → <b>AI 브리핑</b> → Run workflow를 누르세요.</p></section>`;
+  const i = Math.min(state.report, D.reports.length - 1), r = D.reports[i];
+  const d = new Date(r.id + 'T00:00:00Z'), dl = `${d.getUTCFullYear()}년 ${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일 (${WD[d.getUTCDay()]})`;
+  const nav = `<div class="rnav"><button class="btn" data-rnav="1" ${i >= D.reports.length - 1 ? 'disabled' : ''}>‹ 이전</button><b>${dl}</b><button class="btn" data-rnav="-1" ${i <= 0 ? 'disabled' : ''}>다음 ›</button><button class="btn" data-rnav="0" ${i === 0 ? 'disabled' : ''}>최신</button></div>`;
+  if (!r.rep) return `<section class="card"><h2>일일 리포트 - ${dl}</h2>${nav}<p class="note">이 날짜는 이전 형식으로 작성된 리포트입니다.</p><div class="md">${mdRender(r.md)}</div></section>`;
+  const p = r.rep, sc = state.rscope;
+  const secs = [...(sc !== 'kr' ? SEC_G : []), ...(sc !== 'g' ? SEC_K : [])];
+  const cat = state.mcat, ms = p.metrics.filter((m) => !cat || mcatOf(m.grp) === cat);
+  const cnt = (c) => p.metrics.filter((m) => !c || mcatOf(m.grp) === c).length;
+  const used = new Set([...p.key3, ...p.watch, ...Object.values(p.sections).flat()].flatMap((x) => x.refs));
+  const newsAll = [...p.news, ...(p.web || [])];
+  return `
+  <section class="card"><h2>일일 리포트 - ${dl}</h2><p class="sub">${kstTime(p.created)} 작성 · 문장 옆 번호를 누르면 근거로 쓴 기사·지표로 이동</p>
+    ${nav}<div class="row"><span class="seg" id="rsc">${[['all', '전체'], ['g', '글로벌'], ['kr', '한국']].map(([k, n]) => `<button data-s="${k}" class="${sc === k ? 'on' : ''}">${n}</button>`).join('')}</span></div>
+    <h3>오늘의 한 줄</h3><blockquote class="one">${esc(p.oneLine)}</blockquote>
+    <h3>오늘의 핵심 3줄</h3>${repItems(p.key3)}
+    <h3>오늘·이번 주 볼 것</h3>${repItems(p.watch)}
+    ${secs.map(([k, n]) => `<h3>${n}</h3>${repItems(p.sections[k])}`).join('')}
+    ${p.summary ? `<h3>정리</h3><p>${esc(p.summary)}</p>` : ''}
+    <p class="note">Claude가 자동 작성한 참고 자료이며 투자 권유가 아닙니다. 숫자는 근거 지표·원문 기사에서 확인하세요.</p></section>
+  <section class="card"><h2>시장 심리</h2><p class="sub">${r.id} 리포트 작성 시점 기준</p>${mood(p)}
+    <h3>경제 동향 한 줄 요약</h3><div class="idx">${['USDKRW', 'SPX', 'KOSPI', 'GOLD', 'WTI', 'US10Y', 'BTC'].map((k) => p.metrics.find((m) => m.k === k)).filter(Boolean).map((m) => `<div style="border-left-color:${m.n >= 0 ? '#d6336c' : '#1c7ed6'}"><div class="nm">${esc(m.name)}</div><div class="v n" style="font-size:16px">${esc(m.val)}</div><div class="n ${cls(m.n)}">${esc(m.chg)} ${m.n > 0 ? '상승' : m.n < 0 ? '하락' : ''}</div></div>`).join('')}</div></section>
+  <section class="card" id="refs-m"><h2>글로벌 경제 지표</h2><p class="sub">리포트가 근거로 쓴 지표 · 번호는 본문 인용 번호</p>
+    <div class="chips" id="mcat" style="margin-bottom:10px">${MCAT.filter(([c]) => cnt(c)).map(([c, n]) => `<button class="chip ${cat === c ? 'on' : ''}" data-c="${c}">${n}<b>${cnt(c)}</b></button>`).join('')}</div>
+    <div class="tw"><table class="tbl"><thead><tr><th>번호</th><th>항목</th><th class="r">값</th><th class="r">변동</th><th class="r">1주</th><th class="r">1달</th><th>거래일</th></tr></thead><tbody>${ms.map((m) => `<tr id="ref-${m.id}" class="${used.has(m.id) ? 'used' : ''}"><td class="sm n">${m.id}</td><td>${esc(m.name)}</td><td class="r">${esc(m.val)}</td><td class="r ${cls(m.n)}">${esc(m.chg)}</td><td class="r">${esc(m.w1 || '')}</td><td class="r">${esc(m.m1 || '')}</td><td class="sm n">${md(m.d)}</td></tr>`).join('')}</tbody></table></div></section>
+  <section class="card" id="refs-n"><h2>근거 뉴스</h2><p class="sub">본문에 인용된 기사는 굵게 표시 · 제목을 누르면 원문</p>
+    ${newsAll.map((n) => `<div class="nref ${used.has(n.id) ? 'used' : ''}" id="ref-${n.id}"><span class="sm n">${n.id}</span><a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">${esc(n.title)}</a><span class="sm">${esc(n.src)}${n.n > 1 ? ` 외 ${n.n - 1}건` : ''}</span></div>`).join('')}</section>`;
 };
+function jumpRef(id) {
+  if (id[0] === 'M' && state.mcat) { state.mcat = ''; render(); }
+  const el = document.getElementById('ref-' + id); if (!el) return toast('근거를 찾지 못했습니다');
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 2200);
+}
 
 VIEW.cal = () => {
   $('#title').textContent = '일정';
@@ -336,7 +392,10 @@ document.addEventListener('click', (e) => {
   const mvr = e.target.closest('#mvr button'); if (mvr) { state.mvRegion = mvr.dataset.r; return render(); }
   const ms = e.target.closest('#mseg button'); if (ms) return go('market', ms.dataset.s);
   const kw = e.target.closest('[data-kw]'); if (kw) { state.kw = state.kw === kw.dataset.kw ? '' : kw.dataset.kw; return render(); }
-  const rp = e.target.closest('[data-rep]'); if (rp) { state.report = +rp.dataset.rep; return render(); }
+  const rf = e.target.closest('[data-ref]'); if (rf) { if (state.tab !== 'ai') { state.tab = 'ai'; state.report = 0; render(); } return jumpRef(rf.dataset.ref); }
+  const rn = e.target.closest('[data-rnav]'); if (rn) { const k = +rn.dataset.rnav; state.report = k === 0 ? 0 : Math.max(0, Math.min(D.reports.length - 1, state.report + k)); return render(); }
+  const rs = e.target.closest('#rsc button'); if (rs) { state.rscope = rs.dataset.s; const y = window.scrollY; render(); return window.scrollTo(0, y); }
+  const mc = e.target.closest('#mcat button'); if (mc) { state.mcat = mc.dataset.c; const y = window.scrollY; render(); return window.scrollTo(0, y); }
   const ck = e.target.closest('#ck button'); if (ck) { state.calKind = ck.dataset.c; return render(); }
   const ct = e.target.closest('tr[data-cot]'); if (ct) { const c = D.cot.find((x) => x.code === ct.dataset.cot); if (c) modal(esc(c.name) + ' <small>투기 세력 순포지션</small>', lineChart([{ name: '순포지션', color: '#3b5bdb', pts: c.hist }], { h: 240, zero: true, yfmt: (v) => fmt(v / 1000, 0) + 'K' })); }
 });
