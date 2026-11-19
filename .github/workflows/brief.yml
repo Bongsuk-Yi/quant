@@ -45,12 +45,14 @@ jobs:
           node -e '
             const fs=require("fs"); const d=new Date(Date.now()+9*3600e3);
             const t=fs.readFileSync("../prompts/brief.md","utf8").replaceAll("{{TODAY}}",d.toISOString().slice(0,10))
-              .replaceAll("{{WEEKDAY}}","일월화수목금토"[d.getUTCDay()]+"요일").replaceAll("{{MONTHDAY}}",`${d.getUTCMonth()+1}월 ${d.getUTCDate()}일`);
+              .replaceAll("{{WEEKDAY}}","일월화수목금토"[d.getUTCDay()]+"요일").replaceAll("{{MONTHDAY}}",`${d.getUTCMonth()+1}월 ${d.getUTCDate()}일`)
+              .replaceAll("{{OUT}}",process.cwd()+"/out/report.json");
             fs.writeFileSync("prompt.txt",t);'
           claude -p "$(cat prompt.txt)" --allowedTools "Read,Write,Glob,Grep,WebSearch,WebFetch" --output-format json ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"} > claude.json || { tail -c 2000 claude.json; exit 1; }
           node -e '
             const fs=require("fs"); const r=JSON.parse(fs.readFileSync("claude.json","utf8"));
             if (r.is_error) { console.log("::error::", String(r.result).slice(0,1500)); process.exit(1); }
+            if (!fs.existsSync("out/report.json") && fs.existsSync("../out/report.json")) { fs.copyFileSync("../out/report.json","out/report.json"); console.log("::warning::리포트가 저장소 최상위 out/ 에 저장되어 work/out/ 으로 복사했습니다"); }
             if (!fs.existsSync("out/report.json")) { console.log("::error::리포트 파일이 없습니다", String(r.result).slice(0,800)); process.exit(1); }
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- 턴 ${r.num_turns} · 모델 ${Object.keys(r.modelUsage||{}).join(",")}\n`);'
 
